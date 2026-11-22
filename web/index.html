@@ -1510,9 +1510,11 @@ class RippleTank {
 // and the Story tab edits it. Every visualiser reads it through STORY below.
 const LAYER_NAMES = { grid: "Grid", kicks: "Kick waves", claps: "Clap snaps", packets: "Melody pulses", lasers: "Cymbal lasers",
                       nebula: "Gas clouds", planets: "Planets", blackholes: "Black holes", comets: "Comets & novas",
-                      streams: "Data streams", field: "Number field", wireframes: "Wireframes", smoke: "Smoke" };
+                      streams: "Data streams", field: "Number field", wireframes: "Wireframes", smoke: "Smoke",
+                      city: "City", data: "Data links", sky: "Sky membrane", scans: "Scan planes" };
 // effects that have no rule of their own in the default story copy one that does
-const LAYER_LIKE = { nebula: "grid", comets: "packets", planets: "kicks", blackholes: "lasers", streams: "packets", field: "grid", wireframes: "kicks" };
+const LAYER_LIKE = { nebula: "grid", comets: "packets", planets: "kicks", blackholes: "lasers", streams: "packets", field: "grid", wireframes: "kicks",
+                     city: "grid", data: "packets", sky: "kicks", scans: "claps" };
 const LAYER_OFF = { smoke: true };      // used sparingly: off unless a chapter turns it on
 const layerOn = (sec, k) => k in sec.layers ? !!sec.layers[k] : LAYER_OFF[k] ? false
   : LAYER_LIKE[k] && LAYER_LIKE[k] in sec.layers ? !!sec.layers[LAYER_LIKE[k]] : sec.layers.kicks !== false;
@@ -2503,6 +2505,262 @@ class SignalPlane {
   stats() { return [["streams", this.streams.length], ["characters", this.glyphs || 0], ["wireframes", this.objects.length]]; }
 }
 
+// =========================== VISUALISER 7: WIRE CITY =======================
+// A wireframe city floating in the dark, between three planes: a dot grid under the streets, a
+// flexing point-cloud "sky membrane" above the rooftops, and vertical scan planes that sweep through.
+// Data travels between buildings through the sky: beams shoot up from rooftops, pierce the membrane,
+// cross it as trains of characters and drop into another building, which lights up. The story's
+// variation moves the camera: orbit, street level, top-down plan, rising spiral.
+const CITY = {
+  SEED: 77,
+  FOCAL: 1150, BLOCKS: 12, BLOCK: 150, STREET: 50,
+  SKY: 950,                          // height of the sky membrane
+  SKY_SPEED: 1500,                   // data crossing the sky, units/s
+  KICK_RING: 1800,                   // kick: speed of the pulse through the streets
+  MEMBRANE: 90,                      // kick ripple height in the membrane
+  SAG: 140,                          // bass: how far the membrane sags
+  CAM_SPEED: 0.12,                   // orbit speed at full energy, rad/s
+  CITY_INT: 0.12, DATA_INT: 1.0, SKY_INT: 0.8, GLYPH: 72,
+  GLOW: 0.6, EXPOSURE: 1.5, FADE_IN: 1.5, FADE_OUT: 3.0,
+  PALETTE_LOCK: -1,
+};
+const CITY_SLIDERS = [
+  ["GLOW", "Glow", 0, 2.5, 0.05],
+  ["EXPOSURE", "Exposure", 0.6, 3, 0.05],
+  ["CITY_INT", "City lines", 0, 0.5, 0.01],
+  ["DATA_INT", "Data brightness", 0, 1.5, 0.05],
+  ["SKY_SPEED", "Data speed", 300, 4000, 50],
+  ["MEMBRANE", "Kick ripples", 0, 300, 5],
+  ["SAG", "Bass sag", 0, 400, 5],
+  ["CAM_SPEED", "Camera speed", 0, 0.5, 0.01],
+];
+const CITY_MODES = ["orbit", "street level", "plan view", "rising spiral"];
+
+class WireCity {
+  constructor(F) {
+    const C = CITY, rng = this.rng = makeRng(C.SEED);
+    this.F = F; this.frame = -1; this.G = sigPrograms(renderer);
+    // the city: blocks of lots, taller towards the middle, some with setbacks and spires
+    this.b = [];
+    const span = C.BLOCKS * (C.BLOCK + C.STREET), half = span / 2;
+    for (let bx = 0; bx < C.BLOCKS; bx++) for (let bz = 0; bz < C.BLOCKS; bz++) {
+      const ox = -half + bx * (C.BLOCK + C.STREET) + C.STREET / 2, oz = -half + bz * (C.BLOCK + C.STREET) + C.STREET / 2;
+      const d = Math.hypot(ox + C.BLOCK / 2, oz + C.BLOCK / 2) / half, tall = Math.exp(-d * d * 2.2);
+      const split = rng() < 0.5 ? 1 : 2, lots = [];
+      for (let a = 0; a < split; a++) for (let c = 0; c < split; c++) lots.push([ox + a * C.BLOCK / split, oz + c * C.BLOCK / split, C.BLOCK / split]);
+      for (const [lx, lz, size] of lots) {
+        if (rng() < 0.08) continue;                                  // a park
+        const h = 40 + rng() * rng() * 120 + tall * (150 + rng() * 950);
+        const bld = { x0: lx + 8, x1: lx + size - 8, z0: lz + 8, z1: lz + size - 8, h, glow: 0, top: h };
+        if (h > 300 && rng() < 0.35) { bld.h2 = h * (0.2 + 0.2 * rng()); bld.top = h + bld.h2; }
+        if (bld.top > 750 && rng() < 0.5) { bld.spire = 80 + rng() * 160; }
+        bld.cx = (bld.x0 + bld.x1) / 2; bld.cz = (bld.z0 + bld.z1) / 2;
+        bld.sector = Math.floor(((Math.atan2(bld.cz, bld.cx) + Math.PI) / (2 * Math.PI)) * 12) % 12;
+        bld.win = []; const nw = Math.min(14, Math.floor(h / 60));
+        for (let k = 0; k < nw; k++) { const f = Math.floor(rng() * 4), u = rng(), y = 15 + rng() * (h - 25);
+          bld.win.push([f === 0 ? bld.x0 + u * (bld.x1 - bld.x0) : f === 1 ? bld.x1 : f === 2 ? bld.x0 + u * (bld.x1 - bld.x0) : bld.x0, y,
+                        f === 0 ? bld.z0 : f === 1 ? bld.z0 + u * (bld.z1 - bld.z0) : f === 2 ? bld.z1 : bld.z0 + u * (bld.z1 - bld.z0), rng()]); }
+        this.b.push(bld);
+      }
+    }
+    this.half = half;
+    this.bySector = Array.from({ length: 12 }, (_, k) => this.b.filter(q => q.sector === k && q.top > 60));
+    this.cam = { x: 0, y: 900, z: -2200, yaw: 0, pitch: 0.3 }; this.camT = null;
+    this.ang = 0; this.waves = []; this.packets = []; this.scans = []; this.rings = [];
+    this.pal = PALETTES[0].map(c => c.slice()); this.E = 1; this.t = 0; this.scanAxis = 0; this.inst = new Float32Array(11 * 8192); this.hud = new Float32Array(11 * 256);
+  }
+  dispose() {}
+
+  camTarget(v, t) {                  // where each camera mode wants to be: [x, y, z, lookX, lookY, lookZ]
+    const a = this.ang;
+    if (v === 0) return [Math.sin(a) * 2300, 1900, Math.cos(a) * 2300, 0, 300, 0];                          // orbit from above the membrane
+    if (v === 1) return [Math.sin(a * 1.6) * 820, 110, Math.cos(a * 1.6) * 820, Math.sin(a * 1.6 + 0.9) * 820, 260, Math.cos(a * 1.6 + 0.9) * 820]; // street level among towers
+    if (v === 2) return [Math.sin(a * 0.5) * 120, 3000, Math.cos(a * 0.5) * 120 - 1, 0, 0, 0];             // plan view through the membrane
+    const h = 350 + 1900 * (0.5 - 0.5 * Math.cos(t * 0.09));                                                // rising spiral, up through the membrane
+    return [Math.sin(a * 1.3) * 1600, h, Math.cos(a * 1.3) * 1600, 0, h * 0.45, 0];
+  }
+  proj(X, Y, Z) {
+    const c = this.cam, rx = X - c.x, ry = Y - c.y, rz = Z - c.z, cy = Math.cos(c.yaw), sy = Math.sin(c.yaw);
+    const x2 = rx * cy - rz * sy, z2 = rx * sy + rz * cy, cp = Math.cos(c.pitch), sp = Math.sin(c.pitch);
+    const zc = -ry * sp + z2 * cp, yc = ry * cp + z2 * sp;
+    if (zc < 8) return null;
+    return [CONFIG.W / 2 + x2 / zc * CITY.FOCAL, CONFIG.H / 2 - yc / zc * CITY.FOCAL, zc];
+  }
+  sky(x, z) {                        // membrane height at (x, z): kick ripples and bass sag
+    let y = CITY.SKY - this.sag * Math.exp(-(x * x + z * z) / (2 * 900 * 900));
+    for (const w of this.waves) { const r = Math.hypot(x - w.x, z - w.z), age = this.t - w.t0; y += w.A * Math.exp(-age * 1.3) * Math.exp(-Math.pow((r - 900 * age) / 120, 2)); }
+    return y;
+  }
+
+  step(i) {
+    const C = CITY, F = this.F, rng = this.rng;
+    this.frame = i; this.t = i * DT;
+    const E = STORY.energy(i), v = STORY.variant(i); this.E = E; this.mode = v;
+    this.Lc = STORY.layer("city", i); const Ld = STORY.layer("data", i), Ls = STORY.layer("sky", i), Lx = STORY.layer("scans", i);
+    this.Ls = Ls; this.Ld = Ld;
+    const target = PALETTES[C.PALETTE_LOCK >= 0 ? C.PALETTE_LOCK : STORY.palette(i, F)];
+    const kp = 1 - Math.exp(-1.2 * DT);
+    for (let a = 0; a < 4; a++) for (let c = 0; c < 3; c++) this.pal[a][c] += (target[a][c] - this.pal[a][c]) * kp;
+
+    // camera: glide towards this mode's position and look-at point
+    this.ang += (0.02 + C.CAM_SPEED * E + 0.08 * (F.lowmid[i] - 0.4)) * DT;
+    const T = this.camTarget(v % 4, this.t);
+    if (!this.camT) this.camT = T.slice();
+    const kc = 1 - Math.exp(-DT / 1.6);
+    for (let k = 0; k < 6; k++) this.camT[k] += (T[k] - this.camT[k]) * kc;
+    const [x, y, z, lx, ly, lz] = this.camT, dx = lx - x, dy = ly - y, dz = lz - z;
+    Object.assign(this.cam, { x, y, z, yaw: Math.atan2(dx, dz), pitch: Math.atan2(-dy, Math.hypot(dx, dz)) });
+
+    const bass = 0.6 * F.sub[i] + 0.4 * F.bass[i];
+    this.sag = C.SAG * bass * Ls;
+    for (const b of this.b) b.glow *= 0.9;
+    // kick: a pulse ring through the streets and a ripple dropped into the membrane
+    if (F.kickHits.has(i)) {
+      const s = 0.4 + 0.6 * F.kickHits.get(i);
+      this.rings.push({ t0: this.t, s: s * this.Lc });
+      if (Ls > 0.05) { const q = this.b[Math.floor(rng() * this.b.length)]; this.waves.push({ x: q.cx * 0.6, z: q.cz * 0.6, t0: this.t, A: C.MEMBRANE * s * Ls * (0.5 + 0.5 * E) }); }
+    }
+    this.waves = this.waves.filter(w => this.t - w.t0 < 3);
+    for (const rg of this.rings) {
+      const R = C.KICK_RING * (this.t - rg.t0);
+      for (const b of this.b) { const d = Math.hypot(b.cx, b.cz); if (Math.abs(d - R) < 70) b.glow = Math.max(b.glow, 0.45 * rg.s); }
+    }
+    this.rings = this.rings.filter(rg => C.KICK_RING * (this.t - rg.t0) < this.half * 1.5);
+    // claps: a vertical scan plane sweeps through, and every building it slices flares
+    if (F.snareHits.has(i) && F.snareHits.get(i) >= FLUX.CLAP_MIN && Lx > 0.05) {
+      this.scanAxis ^= 1; const dir = rng() < 0.5 ? 1 : -1;
+      this.scans.push({ axis: this.scanAxis, pos: -dir * this.half * 1.1, v: dir * 3600, s: Lx });
+    }
+    for (const sc of this.scans) {
+      sc.pos += sc.v * DT;
+      for (const b of this.b) { const lo = sc.axis ? b.z0 : b.x0, hi = sc.axis ? b.z1 : b.x1; if (sc.pos > lo - 20 && sc.pos < hi + 20) b.glow = Math.max(b.glow, sc.s); }
+    }
+    this.scans = this.scans.filter(sc => Math.abs(sc.pos) < this.half * 1.2);
+    // melody: a packet from that note's district to another; some arrive from beyond the city
+    const note = F.melNotes.get(i);
+    if (note && Ld > 0.05 && rng() < Ld && this.packets.length < 90) {
+      const pool = this.bySector[note.k].length ? this.bySector[note.k] : this.b, from = pool[Math.floor(rng() * pool.length)];
+      const others = this.bySector[(note.k + 3 + Math.floor(rng() * 6)) % 12], to = others.length ? others[Math.floor(rng() * others.length)] : this.b[Math.floor(rng() * this.b.length)];
+      const chars = []; for (let q = 0; q < 8 + Math.floor(rng() * 12); q++) chars.push(Math.floor(rng() * 16));
+      const col = STRING_COLORS[note.k].map(c => 0.6 + 0.4 * c);
+      if (rng() < 0.25) {                       // from beyond the city: enters along the membrane
+        const a = rng() * 2 * Math.PI, R = this.half * 1.6;
+        this.packets.push({ from: null, to, sx: Math.cos(a) * R, sz: Math.sin(a) * R, phase: 1, u: 0, chars, col, age: 0, s: note.s });
+      } else this.packets.push({ from, to, sx: from.cx, sz: from.cz, phase: 0, u: 0, chars, col, age: 0, s: note.s });
+    }
+    const spd = C.SKY_SPEED * (0.5 + 0.7 * E);
+    for (const p of this.packets) {
+      p.age += DT;
+      if (p.phase === 0) { p.u += DT / 0.45; if (p.u >= 1) { p.phase = 1; p.u = 0; } }
+      else if (p.phase === 1) { const L = Math.hypot(p.to.cx - p.sx, p.to.cz - p.sz) + 1; p.u += spd * DT / L; if (p.u >= 1) { p.phase = 2; p.u = 0; } }
+      else { p.u += DT / 0.3; if (p.u >= 1) { p.phase = 3; p.to.glow = Math.max(p.to.glow, 1); p.flash = 1; } }
+      if (rng() < 0.4) p.chars[Math.floor(rng() * p.chars.length)] = Math.floor(rng() * 16);
+    }
+    for (const p of this.packets) if (p.phase === 3) p.flash *= 0.8;
+    this.packets = this.packets.filter(p => !(p.phase === 3 && p.flash < 0.05) && p.age < 10);
+    // hats: windows flicker
+    if (F.hatHits.has(i)) { const n = Math.round(60 * F.hatHits.get(i) * (0.4 + E)); for (let k = 0; k < n; k++) { const b = this.b[Math.floor(rng() * this.b.length)]; if (b.win.length) b.win[Math.floor(rng() * b.win.length)][3] = rng(); b.wf = 1; } }
+  }
+
+  draw() {
+    const r = renderer, gl = r.gl, C = CITY, F = this.F, i = this.frame, s = r.scale, cam = this.cam, E = this.E;
+    const W = CONFIG.W, H = CONFIG.H, acc = this.pal[3], white = [0.88, 0.92, 1];
+    gl.bindFramebuffer(gl.FRAMEBUFFER, r.acc.fb); gl.viewport(0, 0, r.acc.w, r.acc.h);
+    gl.disable(gl.BLEND); gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+    let n = 0;
+    const fog = zc => Math.exp(-zc * 0.00022);
+    const line = (A, B, col, it) => {
+      const a = this.proj(...A), b = this.proj(...B); if (!a || !b) return;
+      const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy); if (L > 4000) return;
+      if (Math.max(a[0], b[0]) < -10 || Math.min(a[0], b[0]) > W + 10 || Math.max(a[1], b[1]) < -10 || Math.min(a[1], b[1]) > H + 10) return;
+      const m = Math.max(1, Math.ceil(L / 2.2)), f = it * fog((a[2] + b[2]) / 2);
+      for (let q = 0; q <= m; q++) { const u = q / m; r.pushDot(n++, a[0] + dx * u, a[1] + dy * u, col[0], col[1], col[2], f); }
+    };
+    const point = (X, Y, Z, col, it) => { const p = this.proj(X, Y, Z); if (p) r.pushDot(n++, p[0], p[1], col[0], col[1], col[2], it * fog(p[2])); };
+    // ground: a dot grid under the streets, and the kick pulse rings
+    const half = this.half, step = C.BLOCK + C.STREET;
+    for (let gx = -half; gx <= half + 1; gx += step / 2) for (let gz = -half; gz <= half + 1; gz += step / 2) point(gx, 0, gz, white, 0.25 * this.Lc);
+    for (const rg of this.rings) {
+      const R = C.KICK_RING * (this.t - rg.t0), f = rg.s * Math.max(0, 1 - R / (half * 1.5));
+      let prev = null; for (let k = 0; k <= 96; k++) { const a = k / 96 * 2 * Math.PI, P = [Math.cos(a) * R, 0, Math.sin(a) * R]; if (prev) line(prev, P, acc, 0.35 * f); prev = P; }
+    }
+    // the city
+    for (const b of this.b) {
+      const it = C.CITY_INT * this.Lc * (0.5 + 0.5 * E) + 0.5 * b.glow, col = b.glow > 0.1 ? white.map((c, k) => c * (1 - b.glow * 0.5) + acc[k] * b.glow * 0.5) : white;
+      if (it < 0.004) continue;
+      const box = (x0, x1, z0, z1, y0, y1) => {
+        const P = [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]];
+        for (const [a, c] of [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]) line(P[a], P[c], col, it);
+      };
+      box(b.x0, b.x1, b.z0, b.z1, 0, b.h);
+      if (b.h2) { const ix = (b.x1 - b.x0) * 0.2, iz = (b.z1 - b.z0) * 0.2; box(b.x0 + ix, b.x1 - ix, b.z0 + iz, b.z1 - iz, b.h, b.h + b.h2); }
+      if (b.spire) line([b.cx, b.top, b.cz], [b.cx, b.top + b.spire, b.cz], col, it * 1.5);
+      for (const w of b.win) if (w[3] < 0.5) point(w[0], w[1], w[2], [1, 0.95, 0.8], (0.35 + 0.4 * b.glow) * this.Lc);
+    }
+    // the sky membrane: a point cloud that ripples with kicks and sags with the bass
+    if (this.Ls > 0.02) {
+      const N = 60, ext = half * 1.25;
+      for (let a = 0; a <= N; a++) for (let c = 0; c <= N; c++) {
+        const X = -ext + 2 * ext * a / N, Z = -ext + 2 * ext * c / N, Y = this.sky(X, Z), d = Math.abs(Y - C.SKY + this.sag * 0.3) / 60;
+        point(X, Y, Z, d > 0.2 ? acc.map(q => 0.5 + 0.5 * q) : white, C.SKY_INT * this.Ls * (0.4 + Math.min(1.5, d)));
+      }
+    }
+    // scan planes: a vertical sheet of points sweeping through
+    for (const sc of this.scans) {
+      for (let a = 0; a <= 30; a++) for (let c = 0; c <= 14; c++) {
+        const u = -half + 2 * half * a / 30, Y = C.SKY * c / 14;
+        sc.axis ? point(u, Y, sc.pos, white, 0.3 * sc.s) : point(sc.pos, Y, u, white, 0.3 * sc.s);
+      }
+      sc.axis ? line([-half, 0, sc.pos], [half, 0, sc.pos], white, 0.9 * sc.s) : line([sc.pos, 0, -half], [sc.pos, 0, half], white, 0.9 * sc.s);
+    }
+    // data: beams up from rooftops, through the membrane, down into the destination
+    let m = 0; const I = this.inst;
+    const put = (X, Y, Z, size, g, c, it) => { if ((m + 1) * 11 <= I.length) { I.set([X, Y, Z, 0, 1, size, g, c[0], c[1], c[2], it], m * 11); m++; } };
+    for (const p of this.packets) {
+      const it = C.DATA_INT * this.Ld * (0.6 + 0.4 * p.s);
+      if (p.phase === 0) {
+        const top = p.from.top, sky = this.sky(p.sx, p.sz), hy = top + (sky - top) * p.u;
+        for (const o of [-4, 4]) line([p.sx + o, top, p.sz], [p.sx + o, hy, p.sz], p.col, it * 0.7);
+        point(p.sx, hy, p.sz, [1, 1, 1], it * 3);
+      } else if (p.phase === 1) {
+        const tx = p.to.cx, tz = p.to.cz, L = Math.hypot(tx - p.sx, tz - p.sz) + 1, ux = (tx - p.sx) / L, uz = (tz - p.sz) / L, d = p.u * L;
+        if (p.u < 0.15 && p.from) { const sky = this.sky(p.sx, p.sz); for (let k = 0; k < 24; k++) { const a = k / 24 * 2 * Math.PI, R = 30 + 400 * p.u; point(p.sx + Math.cos(a) * R, sky, p.sz + Math.sin(a) * R, p.col, it * (1 - p.u / 0.15)); } }   // where it pierced the membrane
+        p.chars.forEach((g, q) => { const dd = d - q * C.GLYPH * 0.75; if (dd < 0) return; const X = p.sx + ux * dd, Z = p.sz + uz * dd; put(X, this.sky(X, Z) + 12, Z, C.GLYPH, g, q ? p.col : [1, 1, 1], it * (q ? 1 - 0.6 * q / p.chars.length : 1.6)); });
+      } else if (p.phase === 2) {
+        const top = p.to.top, sky = this.sky(p.to.cx, p.to.cz), hy = sky + (top - sky) * p.u;
+        for (const o of [-4, 4]) line([p.to.cx + o, sky, p.to.cz], [p.to.cx + o, hy, p.to.cz], p.col, it * 0.7);
+        point(p.to.cx, hy, p.to.cz, [1, 1, 1], it * 3);
+      } else { for (let k = 0; k < 20; k++) { const a = k / 20 * 2 * Math.PI, R = 20 + 120 * (1 - p.flash); point(p.to.cx + Math.cos(a) * R, p.to.top, p.to.cz + Math.sin(a) * R, p.col, it * p.flash); } }
+    }
+    const D = r.pDots;
+    gl.bindVertexArray(r.dotVao); gl.bindBuffer(gl.ARRAY_BUFFER, r.dotBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, r.dots.subarray(0, n * 6), gl.STREAM_DRAW);
+    gl.useProgram(D.p); gl.uniform1f(D.u.u_mult, s);
+    gl.uniform2f(D.u.u_center, W / 2, H / 2); gl.uniform2f(D.u.u_rot, 1, 0); gl.uniform1f(D.u.u_zoom, 1); gl.uniform2f(D.u.u_world, W, H);
+    gl.drawArrays(gl.POINTS, 0, n);
+    // characters crossing the sky, then a small readout
+    const G = this.G.glyph;
+    gl.bindVertexArray(this.G.vao); gl.bindBuffer(gl.ARRAY_BUFFER, this.G.buf);
+    gl.useProgram(G.p);
+    gl.uniform3f(G.u.u_cam, cam.x, cam.y, cam.z); gl.uniform1f(G.u.u_pitch, cam.pitch); gl.uniform1f(G.u.u_yaw, cam.yaw);
+    gl.uniform1f(G.u.u_f, C.FOCAL); gl.uniform2f(G.u.u_cs, W / 2, H / 2); gl.uniform2f(G.u.u_world, W, H); gl.uniform1f(G.u.u_fog, 0.00022);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.G.tex); gl.uniform1i(G.u.u_atlas, 0);
+    gl.bufferData(gl.ARRAY_BUFFER, I.subarray(0, m * 11), gl.STREAM_DRAW);
+    gl.uniform1f(G.u.u_screen, 0); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, m);
+    let h = 0; const HI = this.hud, ro = 0.3 * (0.5 + 0.5 * E);
+    const text = (str, x, y, size, it) => { for (let k = 0; k < str.length; k++) { const g = SIG_GLYPHS.indexOf(str[k]); if (g >= 0 && (h + 1) * 11 <= HI.length) { HI.set([x + k * size * 0.62, y, 0, 0, 0, size, g, 0.85, 0.9, 1, it], h * 11); h++; } } };
+    text("LINKS " + String(this.packets.length).padStart(3, "0") + "  SCAN " + String(this.scans.length).padStart(2, "0"), 40, H - 90, 18, ro);
+    text((CITY_MODES[this.mode % 4] || "").toUpperCase().replace(/ /g, "_") + "  " + fmtTime(i / FPS), 40, H - 62, 18, ro * 0.8);
+    gl.bufferData(gl.ARRAY_BUFFER, HI.subarray(0, h * 11), gl.STREAM_DRAW);
+    gl.uniform1f(G.u.u_screen, 1); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, h);
+    gl.bindVertexArray(null); gl.disable(gl.BLEND);
+    this.points = n;
+    r.compose({ F, frame: i, bg: [0, 0, 0], glow: C.GLOW, exposure: C.EXPOSURE, fadeIn: C.FADE_IN, fadeOut: C.FADE_OUT });
+  }
+  stats() { return [["camera", CITY_MODES[this.mode % 4] || "–"], ["links", this.packets.length], ["buildings", this.b.length], ["points", (this.points || 0).toLocaleString()]]; }
+}
+
 // =========================== VISUALISER MENU ===============================
 // Every visualiser shares the analysis, playback, recording and glow pass, and brings its own
 // physics, drawing, settings and "how the music drives it" table.
@@ -2616,6 +2874,25 @@ const VISUALISERS = [
     ],
     layers: ["streams", "field", "wireframes", "smoke"],
     create: F => new SignalPlane(F),
+  },
+  {
+    id: "wire-city", name: "Wire City", status: "On trial",
+    blurb: "A wireframe city with data beaming between its towers through strange planes",
+    config: CITY, sliders: CITY_SLIDERS, particles: false,
+    hints: { sub: "sag", kick: "pulse", snare: "scan", lowmid: "drift", hat: "windows", centroid: "–", melody: "links" },
+    mapping: [
+      ["Melody", "Each note sends a packet from its own district: a beam up from a rooftop, through the sky membrane, across it as a train of characters, and down into another tower, which lights up. Some packets arrive from beyond the city"],
+      ["Kick", "A pulse ring spreads through the streets, lighting buildings as it passes, and a ripple drops into the sky membrane"],
+      ["Sub + bass", "The sky membrane sags towards the rooftops"],
+      ["Clap", "A vertical scan plane sweeps through the city; every building it slices flares"],
+      ["Hats", "Windows flicker"],
+      ["Low mids", "The camera drifts faster or slower"],
+      ["Story energy", "Camera speed, how bright the city is, how fast the data moves"],
+      ["Story effects", "City, data links, sky membrane and scan planes, chapter by chapter"],
+      ["Story variation", "The camera: orbit from above, street level among the towers, plan view through the membrane, or a rising spiral"],
+    ],
+    layers: ["city", "data", "sky", "scans"],
+    create: F => new WireCity(F),
   },
 ];
 VISUALISERS.forEach(v => { v.defaults = JSON.parse(JSON.stringify(v.config)); });
@@ -2800,7 +3077,8 @@ function renderSectionEditor() {
     chips.appendChild(b);
   }
   $("seVar").value = String(sec.variation);
-  $("seVarNote").textContent = app.vis.id === "signal-plane" ? "Changes the cable layout (lanes, diagonals, meanders, fan), the objects below, and the accent colour."
+  $("seVarNote").textContent = app.vis.id === "wire-city" ? "Changes the camera: orbit, street level, plan view or rising spiral; and the accent colour."
+    : app.vis.id === "signal-plane" ? "Changes the cable layout (lanes, diagonals, meanders, fan), the objects below, and the accent colour."
     : app.vis.id === "deep-voyage" ? "Changes the region: open space, a planetary system, a black hole zone or a nebula; and the palette."
     : "Changes where kicks land, where lasers fire from, and the palette.";
 }
@@ -2823,7 +3101,8 @@ function drawStory() {
   const top = 24, bot = lanesTop - 10;
   const LANE_COLS = { grid: "#7aa2ff", kicks: "#ff8a5c", claps: "#ffd36b", packets: "#c38bff", lasers: "#7ff0d8",
                       nebula: "#b48cff", planets: "#7fd1ff", blackholes: "#ffb36b", comets: "#9be37a",
-                      streams: "#e8ecff", field: "#8a93b8", wireframes: "#7fd1ff", smoke: "#ff7a9a" };
+                      streams: "#e8ecff", field: "#8a93b8", wireframes: "#7fd1ff", smoke: "#ff7a9a",
+                      city: "#cfd8ff", data: "#7ff0d8", sky: "#b48cff", scans: "#ffd36b" };
   S.sections.forEach((sec, s) => {
     const x0 = X(sec.start), x1 = X(sec.end);
     if (s === app.selSec) { g.fillStyle = photon; g.globalAlpha = 0.14; g.fillRect(x0, 0, x1 - x0, h); g.globalAlpha = 1; }
