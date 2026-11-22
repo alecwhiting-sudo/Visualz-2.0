@@ -1511,10 +1511,12 @@ class RippleTank {
 const LAYER_NAMES = { grid: "Grid", kicks: "Kick waves", claps: "Clap snaps", packets: "Melody pulses", lasers: "Cymbal lasers",
                       nebula: "Gas clouds", planets: "Planets", blackholes: "Black holes", comets: "Comets & novas",
                       streams: "Data streams", field: "Number field", wireframes: "Wireframes", smoke: "Smoke",
-                      city: "City", data: "Data links", sky: "Sky membrane", scans: "Scan planes" };
+                      city: "City", data: "Data links", sky: "Sky membrane", scans: "Scan planes",
+                      trees: "Trees", leaves: "Leaves", rain: "Data rain", beings: "Light beings" };
 // effects that have no rule of their own in the default story copy one that does
 const LAYER_LIKE = { nebula: "grid", comets: "packets", planets: "kicks", blackholes: "lasers", streams: "packets", field: "grid", wireframes: "kicks",
-                     city: "grid", data: "packets", sky: "kicks", scans: "claps" };
+                     city: "grid", data: "packets", sky: "kicks", scans: "claps",
+                     trees: "grid", rain: "packets", beings: "grid" };
 const LAYER_OFF = { smoke: true };      // used sparingly: off unless a chapter turns it on
 const layerOn = (sec, k) => k in sec.layers ? !!sec.layers[k] : LAYER_OFF[k] ? false
   : LAYER_LIKE[k] && LAYER_LIKE[k] in sec.layers ? !!sec.layers[LAYER_LIKE[k]] : sec.layers.kicks !== false;
@@ -1573,6 +1575,7 @@ function autoStory(F) {
     seen[th] = (seen[th] ?? -1) + 1;
     for (const [k, like] of Object.entries(LAYER_LIKE)) L[k] = L[like];
     L.smoke = low || k === drop;                                   // smoke: just the breakdowns and the drop
+    L.leaves = !low && k !== ch.length - 1;                        // bare trees in the breakdowns and at the end
     sections.push({ start: c.start, end: c.end, theme: th, occ: seen[th] + 1, level: +level.toFixed(2), shape, variation: seen[th] % 4, layers: L });
   });
   return { auto: true, drop, sig: n + ":" + Math.round(F.duration), sections };
@@ -2761,6 +2764,281 @@ class WireCity {
   stats() { return [["camera", CITY_MODES[this.mode % 4] || "–"], ["links", this.packets.length], ["buildings", this.b.length], ["points", (this.points || 0).toLocaleString()]]; }
 }
 
+// =========================== VISUALISER 8: DATA FOREST =====================
+// A wireframe forest in the dark. Columns of characters fall as data rain, blown by strange winds
+// that bend the trees (more at the top, as real trees bend). Leaves come and go with the story and
+// tear loose on claps. Light beings cling to the trunks, sliding up and down with flowing tendrils
+// (simulated chains in the same wind) and sometimes float across to another tree.
+const FOREST = {
+  SEED: 88,
+  TREES: 75, RADIUS: 2400, FOCAL: 1050,
+  WIND: 90,                          // wind strength at full energy (how far tree tops lean, units)
+  GUST: 70,                          // kick: a gust
+  RAIN: 70,                          // data rain columns per second at full energy
+  RAIN_SPEED: 1300,
+  BEINGS: 20,
+  TREE_INT: 0.42, LEAF_INT: 0.75, RAIN_INT: 0.65, BEING_INT: 1.6,
+  GLOW: 0.8, EXPOSURE: 1.7, FADE_IN: 1.5, FADE_OUT: 3.0,
+  PALETTE_LOCK: -1,
+};
+const FOREST_SLIDERS = [
+  ["GLOW", "Glow", 0, 2.5, 0.05],
+  ["EXPOSURE", "Exposure", 0.6, 3, 0.05],
+  ["WIND", "Wind", 0, 300, 5],
+  ["GUST", "Kick gusts", 0, 250, 5],
+  ["RAIN", "Data rain", 0, 200, 5],
+  ["TREE_INT", "Tree lines", 0, 1, 0.01],
+  ["LEAF_INT", "Leaves", 0, 2, 0.02],
+  ["BEING_INT", "Light beings", 0, 3, 0.05],
+];
+const FOREST_VIEWS = ["walk", "orbit", "worm's eye", "above the canopy"];
+
+class DataForest {
+  constructor(F) {
+    const C = FOREST, rng = this.rng = makeRng(C.SEED);
+    this.F = F; this.frame = -1; this.G = sigPrograms(renderer);
+    // trees: kept clear of the middle clearing and the walking path (a ring at radius ~900)
+    this.trees = [];
+    let tries = 0;
+    while (this.trees.length < C.TREES && tries++ < 2000) {
+      const a = rng() * 2 * Math.PI, d = 300 + Math.sqrt(rng()) * (C.RADIUS - 300), x = Math.cos(a) * d, z = Math.sin(a) * d;
+      if (Math.abs(d - 900) < 150 || this.trees.some(t => Math.hypot(t.x - x, t.z - z) < 210)) continue;
+      const conifer = rng() < 0.4, H = 700 + rng() * 800, segs = [], tips = [];
+      const trunkTop = H * (conifer ? 0.25 : 0.42);
+      const grow = (p, dir, len, depth, maxD) => {
+        const e = [p[0] + dir[0] * len, p[1] + dir[1] * len, p[2] + dir[2] * len];
+        segs.push([p, e, depth]);
+        if (depth >= maxD) { tips.push(e); return; }
+        const n = 2 + (rng() < 0.35 ? 1 : 0);
+        for (let k = 0; k < n; k++) {
+          const tilt = 0.35 + rng() * 0.5, az = rng() * 2 * Math.PI;
+          let d2 = [dir[0] + Math.cos(az) * Math.sin(tilt), dir[1] * Math.cos(tilt) + 0.25, dir[2] + Math.sin(az) * Math.sin(tilt)];
+          const l = Math.hypot(...d2); d2 = d2.map(q => q / l);
+          grow(e, d2, len * (0.62 + 0.15 * rng()), depth + 1, maxD);
+        }
+      };
+      if (conifer) {                 // a central spire with short drooping side branches
+        segs.push([[0, 0, 0], [0, H, 0], 0]);
+        for (let y = trunkTop; y < H * 0.95; y += 45 + rng() * 25) {
+          const az = rng() * 2 * Math.PI, len = (H - y) * 0.38 + 30, e = [Math.cos(az) * len, y - len * 0.25, Math.sin(az) * len];
+          segs.push([[0, y, 0], e, 2]); tips.push(e);
+        }
+      } else { segs.push([[0, 0, 0], [0, trunkTop, 0], 0]); grow([0, trunkTop, 0], [0, 1, 0], H * 0.3, 1, 4); }
+      const leaves = tips.map(tp => { const L = []; for (let k = 0; k < 4; k++) L.push([tp[0] + (rng() - 0.5) * 40, tp[1] + (rng() - 0.5) * 30, tp[2] + (rng() - 0.5) * 40, rng() * 6.28]); return L; }).flat();
+      this.trees.push({ x, z, H, conifer, segs, tips, leaves, r: 10 + H / 60, ph: rng() * 6.28 });
+    }
+    // light beings: each clings to a trunk, with three tendrils
+    this.beings = [];
+    for (let k = 0; k < C.BEINGS; k++) {
+      const t = this.trees[Math.floor(rng() * this.trees.length)];
+      const b = { tree: t, h: 80 + rng() * t.H * 0.45, ang: rng() * 6.28, vh: 0, glow: 0, col: STRING_COLORS[k % 12].map(c => 0.5 + 0.5 * c), fly: null, pos: [0, 0, 0], tend: [] };
+      this.beings.push(b);
+    }
+    this.rain = []; this.splash = []; this.flying = [];
+    this.wind = [1, 0]; this.windAng = 0; this.gust = 0; this.strength = 0; this.t = 0; this.E = 1; this.ang = 0;
+    this.cam = { x: 0, y: 160, z: -900, yaw: 0, pitch: 0 }; this.camT = null;
+    this.pal = PALETTES[0].map(c => c.slice()); this.inst = new Float32Array(11 * 8192); this.hud = new Float32Array(11 * 256);
+  }
+  dispose() {}
+
+  windAt(x, z) {                     // a wind field: a steady push plus gusts that roll across the forest
+    const t = this.t, s = this.strength, w = this.wind;
+    const roll = 0.6 + 0.4 * Math.sin((x * w[0] + z * w[1]) * 0.0016 - t * 1.7) + 0.25 * Math.sin(x * 0.0031 + t * 0.9) * Math.cos(z * 0.0027 - t * 0.7);
+    return [w[0] * s * roll, w[1] * s * roll];
+  }
+  sway(tree, p) {                    // where a point of a tree has been blown to
+    const [wx, wz] = this.windAt(tree.x, tree.z), k = Math.pow(Math.max(0, p[1]) / tree.H, 1.7);
+    const flick = Math.sin(this.t * 3.1 + tree.ph + p[1] * 0.01) * 6 * k * (0.5 + this.strength / 100);
+    return [tree.x + p[0] + wx * k + flick, p[1], tree.z + p[2] + wz * k + flick * 0.6];
+  }
+  trunkPoint(b) {                    // a being's spot on its trunk, swaying with it
+    const t = b.tree, q = this.sway(t, [0, b.h, 0]), rr = t.r * (1 - b.h / t.H) + 14;
+    return [q[0] + Math.cos(b.ang) * rr, q[1], q[2] + Math.sin(b.ang) * rr];
+  }
+  camTarget(v) {
+    const a = this.ang;
+    if (v === 0) return [Math.sin(a) * 900, 170, Math.cos(a) * 900, Math.sin(a + 0.35) * 900, 260, Math.cos(a + 0.35) * 900];   // walking the path
+    if (v === 1) return [Math.sin(a * 0.6) * 3300, 650, Math.cos(a * 0.6) * 3300, 0, 380, 0];                                 // from outside
+    if (v === 2) return [Math.sin(a * 0.3) * 600, 40, Math.cos(a * 0.3) * 600, Math.sin(a * 0.3 + 0.4) * 900, 1500, Math.cos(a * 0.3 + 0.4) * 900];   // among the trunks, looking up
+    return [Math.sin(a * 0.5) * 1500, 1700, Math.cos(a * 0.5) * 1500 - 600, 0, 300, 400];                                     // above the canopy
+  }
+
+  step(i) {
+    const C = FOREST, F = this.F, rng = this.rng;
+    this.frame = i; this.t = i * DT;
+    const E = STORY.energy(i), v = STORY.variant(i); this.E = E; this.view = v;
+    this.Lt = STORY.layer("trees", i); this.Ll = STORY.layer("leaves", i); const Lr = STORY.layer("rain", i), Lb = STORY.layer("beings", i);
+    this.Lr = Lr; this.Lb = Lb;
+    const target = PALETTES[C.PALETTE_LOCK >= 0 ? C.PALETTE_LOCK : STORY.palette(i, F)];
+    const kp = 1 - Math.exp(-1.2 * DT);
+    for (let a = 0; a < 4; a++) for (let c = 0; c < 3; c++) this.pal[a][c] += (target[a][c] - this.pal[a][c]) * kp;
+    // camera
+    this.ang += (0.03 + 0.07 * E) * DT;
+    const T = this.camTarget(v % 4); if (!this.camT) this.camT = T.slice();
+    const kc = 1 - Math.exp(-DT / 1.8); for (let k = 0; k < 6; k++) this.camT[k] += (T[k] - this.camT[k]) * kc;
+    const [x, y, z, lx, ly, lz] = this.camT, dx = lx - x, dy = ly - y, dz = lz - z;
+    Object.assign(this.cam, { x, y, z, yaw: Math.atan2(dx, dz), pitch: Math.atan2(-dy, Math.hypot(dx, dz)) });
+    // wind: low mids turn it, the story's energy sets its strength, kicks gust
+    this.windAng += (0.05 + 0.5 * (F.lowmid[i] - 0.4)) * DT;
+    this.wind = [Math.cos(this.windAng), Math.sin(this.windAng)];
+    const kick = F.kickHits.has(i);
+    if (kick) this.gust += C.GUST * (0.4 + 0.6 * F.kickHits.get(i)) * (0.4 + 0.6 * E);
+    this.gust *= Math.exp(-2.5 * DT);
+    this.strength += (C.WIND * (0.15 + 0.85 * E) + this.gust - this.strength) * (1 - Math.exp(-3 * DT));
+    this.bass = 0.6 * F.sub[i] + 0.4 * F.bass[i];
+
+    // data rain: columns of characters falling into the forest, pushed by the wind
+    const note = F.melNotes.get(i);
+    const newCol = (col) => {
+      const a = rng() * 2 * Math.PI, d = Math.sqrt(rng()) * C.RADIUS, chars = [];
+      for (let q = 0; q < 6 + Math.floor(rng() * 10); q++) chars.push(Math.floor(rng() * 16));
+      this.rain.push({ x: Math.cos(a) * d, z: Math.sin(a) * d, y: 1500 + rng() * 800, v: C.RAIN_SPEED * (0.7 + 0.6 * rng()), chars, col });
+    };
+    if (Lr > 0.05) {
+      let n = C.RAIN * (0.1 + 0.9 * E) * Lr * DT; while (n > 0) { if (rng() < n) newCol([0.75, 0.95, 0.85]); n -= 1; }
+      if (note) for (let k = 0; k < 3; k++) newCol(STRING_COLORS[note.k].map(c => 0.5 + 0.5 * c));
+    }
+    for (const r of this.rain) {
+      r.y -= r.v * DT; const [wx, wz] = this.windAt(r.x, r.z); r.x += wx * 1.2 * DT; r.z += wz * 1.2 * DT;
+      if (rng() < 0.3) r.chars[Math.floor(rng() * r.chars.length)] = Math.floor(rng() * 16);
+      if (r.y <= 0) this.splash.push({ x: r.x, z: r.z, age: 0, col: r.col, big: F.hat[i] });
+    }
+    this.rain = this.rain.filter(r => r.y > 0);
+    if (this.rain.length > 400) this.rain.splice(0, this.rain.length - 400);
+    for (const s of this.splash) s.age += DT;
+    this.splash = this.splash.filter(s => s.age < 0.5);
+    // claps: a flurry of leaves tears loose (when there are leaves) and a being leaps to another tree
+    const clap = F.snareHits.has(i) && F.snareHits.get(i) >= FLUX.CLAP_MIN;
+    if (clap && this.Ll > 0.3) {
+      const t = this.trees[Math.floor(rng() * this.trees.length)];
+      for (let k = 0; k < 14 && t.leaves.length; k++) { const L = t.leaves[Math.floor(rng() * t.leaves.length)], p = this.sway(t, L); this.flying.push({ x: p[0], y: p[1], z: p[2], vx: 0, vy: 0, vz: 0, spin: rng() * 6, age: 0 }); }
+    }
+    for (const L of this.flying) {
+      const [wx, wz] = this.windAt(L.x, L.z);
+      L.vx += (wx * 2.5 - L.vx) * 1.5 * DT; L.vz += (wz * 2.5 - L.vz) * 1.5 * DT; L.vy += (-60 + 40 * Math.sin(this.t * 2 + L.spin) - L.vy) * 2 * DT;
+      L.x += L.vx * DT; L.y += L.vy * DT; L.z += L.vz * DT; L.spin += 4 * DT; L.age += DT;
+    }
+    this.flying = this.flying.filter(L => L.y > 0 && L.age < 12);
+    if (this.flying.length > 300) this.flying.splice(0, this.flying.length - 300);
+
+    // light beings: slide up and down their trunks; melody makes one glow and climb; claps send one flying
+    if (clap && Lb > 0.05) {
+      const b = this.beings.filter(q => !q.fly)[Math.floor(rng() * this.beings.length)];
+      if (b) { const to = this.trees[Math.floor(rng() * this.trees.length)]; b.fly = { from: this.trunkPoint(b), to, h: 80 + rng() * to.H * 0.45, u: 0, dur: 1.8 + rng() * 1.2 }; }
+    }
+    if (note && Lb > 0.05) { const b = this.beings[note.k % this.beings.length]; b.vh += 160 * (0.5 + note.s); b.glow = 1; }
+    for (const b of this.beings) {
+      b.glow *= 0.93; if (kick) b.glow = Math.max(b.glow, 0.5);
+      if (b.fly) {
+        const f = b.fly; f.u += DT / f.dur;
+        b.tree = f.to; b.h = f.h; const end = this.trunkPoint(b), u = Math.min(1, f.u), s = u * u * (3 - 2 * u);
+        b.pos = [f.from[0] + (end[0] - f.from[0]) * s, f.from[1] + (end[1] - f.from[1]) * s + Math.sin(u * Math.PI) * 220, f.from[2] + (end[2] - f.from[2]) * s];
+        if (f.u >= 1) b.fly = null;
+      } else {
+        b.vh += (rng() - 0.5) * 120 * DT * 10; b.vh *= 0.96; b.h = clamp(b.h + b.vh * DT, 40, b.tree.H * 0.75);
+        if (b.h <= 40 || b.h >= b.tree.H * 0.75) b.vh *= -0.5;
+        b.ang += 0.3 * DT * Math.sin(this.t * 0.5 + b.h);
+        b.pos = this.trunkPoint(b);
+      }
+      // tendrils: chains that trail in the wind behind the body
+      if (!b.tend.length) for (let k = 0; k < 3; k++) { const ch = []; for (let q = 0; q < 10; q++) ch.push([b.pos[0], b.pos[1] - q * 12, b.pos[2], b.pos[0], b.pos[1] - q * 12, b.pos[2]]); b.tend.push(ch); }
+      const [wx, wz] = this.windAt(b.pos[0], b.pos[2]);
+      b.tend.forEach((ch, k) => {
+        ch[0][0] = b.pos[0] + Math.cos(k * 2.1) * 6; ch[0][1] = b.pos[1]; ch[0][2] = b.pos[2] + Math.sin(k * 2.1) * 6;
+        for (let q = 1; q < ch.length; q++) {
+          const n = ch[q], px = n[0], py = n[1], pz = n[2];
+          n[0] += (n[0] - n[3]) * 0.9 + wx * 0.04 + Math.sin(this.t * 2.3 + q * 0.7 + k) * 0.6;
+          n[1] += (n[1] - n[4]) * 0.9 - 0.35 + Math.cos(this.t * 1.9 + q) * 0.3;
+          n[2] += (n[2] - n[5]) * 0.9 + wz * 0.04 + Math.cos(this.t * 2.1 + q * 0.5 + k) * 0.6;
+          n[3] = px; n[4] = py; n[5] = pz;
+        }
+        for (let it = 0; it < 2; it++) for (let q = 1; q < ch.length; q++) {          // keep each link 12 units long
+          const a = ch[q - 1], n = ch[q], dx2 = n[0] - a[0], dy2 = n[1] - a[1], dz2 = n[2] - a[2], d = Math.hypot(dx2, dy2, dz2) || 1, f = 18 / d;
+          n[0] = a[0] + dx2 * f; n[1] = a[1] + dy2 * f; n[2] = a[2] + dz2 * f;
+        }
+      });
+    }
+  }
+
+  draw() {
+    const r = renderer, gl = r.gl, C = FOREST, F = this.F, i = this.frame, s = r.scale, cam = this.cam, E = this.E;
+    const W = CONFIG.W, H = CONFIG.H, [, cold, hot, acc] = this.pal, white = [0.85, 0.95, 0.9];
+    gl.bindFramebuffer(gl.FRAMEBUFFER, r.acc.fb); gl.viewport(0, 0, r.acc.w, r.acc.h);
+    gl.disable(gl.BLEND); gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+    let n = 0;
+    const P = (X, Y, Z) => {
+      const c = cam, rx = X - c.x, ry = Y - c.y, rz = Z - c.z, cy = Math.cos(c.yaw), sy = Math.sin(c.yaw);
+      const x2 = rx * cy - rz * sy, z2 = rx * sy + rz * cy, cp = Math.cos(c.pitch), sp = Math.sin(c.pitch);
+      const zc = -ry * sp + z2 * cp, yc = ry * cp + z2 * sp;
+      if (zc < 8) return null;
+      return [W / 2 + x2 / zc * C.FOCAL, H / 2 - yc / zc * C.FOCAL, zc];
+    };
+    const fog = zc => Math.exp(-zc * 0.00017);
+    const line = (A, B, col, it) => {
+      const a = P(...A), b = P(...B); if (!a || !b) return;
+      const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy); if (L > 3000) return;
+      if (Math.max(a[0], b[0]) < -10 || Math.min(a[0], b[0]) > W + 10 || Math.max(a[1], b[1]) < -10 || Math.min(a[1], b[1]) > H + 10) return;
+      const m = Math.max(1, Math.ceil(L / 2.2)), f = it * fog((a[2] + b[2]) / 2);
+      for (let q = 0; q <= m; q++) { const u = q / m; r.pushDot(n++, a[0] + dx * u, a[1] + dy * u, col[0], col[1], col[2], f); }
+    };
+    const point = (X, Y, Z, col, it) => { const p = P(X, Y, Z); if (p) r.pushDot(n++, p[0], p[1], col[0], col[1], col[2], it * fog(p[2])); return p; };
+    // forest floor: a sparse dot grid, and rain splashes
+    for (let gx = -C.RADIUS; gx <= C.RADIUS; gx += 130) for (let gz = -C.RADIUS; gz <= C.RADIUS; gz += 130) if (gx * gx + gz * gz < C.RADIUS * C.RADIUS) point(gx, 0, gz, cold.map(c => 0.4 + 0.6 * c), 0.2);
+    for (const sp of this.splash) { const R = 10 + 70 * sp.age, f = (1 - sp.age / 0.5) * (0.4 + sp.big); for (let k = 0; k < 12; k++) { const a = k / 12 * 2 * Math.PI; point(sp.x + Math.cos(a) * R, 0, sp.z + Math.sin(a) * R, sp.col, 0.5 * f); } }
+    // trees, bending in the wind; leaves at the tips when the story says so
+    const tc = cold.map(c => 0.55 + 0.45 * c), lc = hot.map(c => 0.4 + 0.6 * c);
+    const ti = C.TREE_INT * this.Lt * (0.6 + 0.4 * E);
+    const flut = 4 + 10 * F.hat[i];
+    for (const t of this.trees) {
+      if (ti > 0.003) for (const [a, b, d] of t.segs) {
+        const A = this.sway(t, a), B = this.sway(t, b), it = ti * (d === 0 ? 1.4 : 1 - d * 0.12);
+        line(A, B, tc, it);
+        if (d === 0) { const o = t.r; line([A[0] + o, A[1], A[2]], [B[0] + o * 0.3, B[1], B[2]], tc, it * 0.6); line([A[0] - o, A[1], A[2]], [B[0] - o * 0.3, B[1], B[2]], tc, it * 0.6); }
+      }
+      if (this.Ll > 0.02) for (const L of t.leaves) {
+        const p = this.sway(t, L), f = Math.sin(this.t * 7 + L[3]) * flut, it = C.LEAF_INT * this.Ll;
+        point(p[0] + f, p[1], p[2] + f * 0.5, lc, it); point(p[0] + f + 5, p[1] + 3, p[2], lc, it * 0.7); point(p[0] + f - 4, p[1] - 3, p[2] + 3, lc, it * 0.7);
+      }
+    }
+    for (const L of this.flying) { const c = Math.cos(L.spin) * 8, sn = Math.sin(L.spin) * 8, it = C.LEAF_INT * 1.3 * Math.min(1, (12 - L.age) / 2); line([L.x - c, L.y - sn * 0.5, L.z - sn], [L.x + c, L.y + sn * 0.5, L.z + sn], lc, it); }
+    // light beings: a glowing body and wafting tendrils
+    if (this.Lb > 0.02) for (const b of this.beings) {
+      const it = C.BEING_INT * this.Lb * (0.5 + 0.5 * E), glow = 0.5 + b.glow + 0.4 * this.bass, col = b.col;
+      b.tend.forEach(ch => { for (let q = 1; q < ch.length; q++) line(ch[q - 1], ch[q], col, it * 0.6 * (1 - q / ch.length)); });
+      const p = P(...b.pos); if (!p) continue;
+      const R = Math.max(4, 40 * C.FOCAL / p[2] * (0.8 + 0.4 * this.bass)), f = fog(p[2]);
+      for (const [rr, w] of [[1, 0.5], [0.6, 0.35], [1.6, 0.12]]) { const m2 = Math.max(12, Math.round(R * rr * 1.5)); for (let k = 0; k < m2; k++) { const a = k / m2 * 2 * Math.PI; r.pushDot(n++, p[0] + Math.cos(a) * R * rr, p[1] + Math.sin(a) * R * rr, col[0], col[1], col[2], it * w * glow * f); } }
+      for (let k = 0; k < 9; k++) r.pushDot(n++, p[0] + ((k % 3) - 1) * R * 0.25, p[1] + (Math.floor(k / 3) - 1) * R * 0.25, 1, 1, 1, it * 0.7 * glow * f);
+    }
+    const D = r.pDots;
+    gl.bindVertexArray(r.dotVao); gl.bindBuffer(gl.ARRAY_BUFFER, r.dotBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, r.dots.subarray(0, n * 6), gl.STREAM_DRAW);
+    gl.useProgram(D.p); gl.uniform1f(D.u.u_mult, s);
+    gl.uniform2f(D.u.u_center, W / 2, H / 2); gl.uniform2f(D.u.u_rot, 1, 0); gl.uniform1f(D.u.u_zoom, 1); gl.uniform2f(D.u.u_world, W, H);
+    gl.drawArrays(gl.POINTS, 0, n);
+    // data rain: falling columns of characters
+    let m = 0; const I = this.inst;
+    for (const rn of this.rain) rn.chars.forEach((g, q) => {
+      if ((m + 1) * 11 > I.length) return;
+      const yy = rn.y + q * 44; if (yy < 0) return;
+      I.set([rn.x, yy, rn.z, 0, 1, 34, g, rn.col[0], rn.col[1], rn.col[2], C.RAIN_INT * this.Lr * (q ? 1 - 0.75 * q / rn.chars.length : 1.8)], m * 11); m++;
+    });
+    const G = this.G.glyph;
+    gl.bindVertexArray(this.G.vao); gl.bindBuffer(gl.ARRAY_BUFFER, this.G.buf);
+    gl.useProgram(G.p);
+    gl.uniform3f(G.u.u_cam, cam.x, cam.y, cam.z); gl.uniform1f(G.u.u_pitch, cam.pitch); gl.uniform1f(G.u.u_yaw, cam.yaw);
+    gl.uniform1f(G.u.u_f, C.FOCAL); gl.uniform2f(G.u.u_cs, W / 2, H / 2); gl.uniform2f(G.u.u_world, W, H); gl.uniform1f(G.u.u_fog, 0.00017);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.G.tex); gl.uniform1i(G.u.u_atlas, 0);
+    gl.bufferData(gl.ARRAY_BUFFER, I.subarray(0, m * 11), gl.STREAM_DRAW);
+    gl.uniform1f(G.u.u_screen, 0); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, m);
+    gl.bindVertexArray(null); gl.disable(gl.BLEND);
+    this.points = n; this.glyphs = m;
+    r.compose({ F, frame: i, bg: [0, 0, 0], glow: C.GLOW, exposure: C.EXPOSURE, fadeIn: C.FADE_IN, fadeOut: C.FADE_OUT });
+  }
+  stats() { return [["view", FOREST_VIEWS[this.view % 4] || "–"], ["wind", Math.round(this.strength || 0)], ["rain", this.rain.length], ["points", (this.points || 0).toLocaleString()]]; }
+}
+
 // =========================== VISUALISER MENU ===============================
 // Every visualiser shares the analysis, playback, recording and glow pass, and brings its own
 // physics, drawing, settings and "how the music drives it" table.
@@ -2893,6 +3171,25 @@ const VISUALISERS = [
     ],
     layers: ["city", "data", "sky", "scans"],
     create: F => new WireCity(F),
+  },
+  {
+    id: "data-forest", name: "Data Forest", status: "On trial",
+    blurb: "A wireframe forest in strange winds, data rain and light beings on the trunks",
+    config: FOREST, sliders: FOREST_SLIDERS, particles: false,
+    hints: { sub: "breathe", kick: "gust", snare: "leap", lowmid: "wind dir", hat: "flutter", centroid: "–", melody: "rain" },
+    mapping: [
+      ["Story energy", "How hard the wind blows and how heavily the data rain falls"],
+      ["Kick", "A gust of wind rolls through the trees, and the light beings pulse"],
+      ["Sub + bass", "The light beings breathe: they swell and glow"],
+      ["Melody", "Data rain in the note's colour, and that note's light being glows and climbs its trunk"],
+      ["Clap", "A light being floats across to another tree, and a flurry of leaves tears loose and wafts away"],
+      ["Hats", "Leaves flutter and the rain splashes sparkle"],
+      ["Low mids", "The wind turns direction"],
+      ["Story effects", "Trees, leaves (bare trees when off), data rain and light beings, chapter by chapter"],
+      ["Story variation", "The view: a walk among the trees, an orbit from outside, a worm's eye view up into the canopy, or above the treetops"],
+    ],
+    layers: ["trees", "leaves", "rain", "beings"],
+    create: F => new DataForest(F),
   },
 ];
 VISUALISERS.forEach(v => { v.defaults = JSON.parse(JSON.stringify(v.config)); });
@@ -3077,7 +3374,8 @@ function renderSectionEditor() {
     chips.appendChild(b);
   }
   $("seVar").value = String(sec.variation);
-  $("seVarNote").textContent = app.vis.id === "wire-city" ? "Changes the camera: orbit, street level, plan view or rising spiral; and the accent colour."
+  $("seVarNote").textContent = app.vis.id === "data-forest" ? "Changes the view: a walk among the trees, an orbit from outside, a worm's eye view up into the canopy, or above the treetops."
+    : app.vis.id === "wire-city" ? "Changes the camera: orbit, street level, plan view or rising spiral; and the accent colour."
     : app.vis.id === "signal-plane" ? "Changes the cable layout (lanes, diagonals, meanders, fan), the objects below, and the accent colour."
     : app.vis.id === "deep-voyage" ? "Changes the region: open space, a planetary system, a black hole zone or a nebula; and the palette."
     : "Changes where kicks land, where lasers fire from, and the palette.";
@@ -3102,7 +3400,8 @@ function drawStory() {
   const LANE_COLS = { grid: "#7aa2ff", kicks: "#ff8a5c", claps: "#ffd36b", packets: "#c38bff", lasers: "#7ff0d8",
                       nebula: "#b48cff", planets: "#7fd1ff", blackholes: "#ffb36b", comets: "#9be37a",
                       streams: "#e8ecff", field: "#8a93b8", wireframes: "#7fd1ff", smoke: "#ff7a9a",
-                      city: "#cfd8ff", data: "#7ff0d8", sky: "#b48cff", scans: "#ffd36b" };
+                      city: "#cfd8ff", data: "#7ff0d8", sky: "#b48cff", scans: "#ffd36b",
+                      trees: "#9be37a", leaves: "#ffb36b", rain: "#7ff0d8", beings: "#ff9ec4" };
   S.sections.forEach((sec, s) => {
     const x0 = X(sec.start), x1 = X(sec.end);
     if (s === app.selSec) { g.fillStyle = photon; g.globalAlpha = 0.14; g.fillRect(x0, 0, x1 - x0, h); g.globalAlpha = 1; }
