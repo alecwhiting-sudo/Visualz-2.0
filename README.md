@@ -21,7 +21,7 @@ A link ending in `#ink-tide` (or any visualiser id) opens that visualiser direct
 | 1 | Gravity Harp (`gravity-harp`) | Kept | Particles under gravity + viscosity, 1-D wave-equation strings, shockwaves |
 | 2 | Ink Tide (`ink-tide`) | Kept | 2-D incompressible Navier–Stokes (stable fluids on the GPU); every force is a vortex pair |
 | 3 | Ripple Tank (`ripple-tank`) | On trial | 2-D damped wave equation; 12 note sources at pitch-scaled frequencies interfere, a refracting lens focuses caustics |
-| 4 | Flux Lattice (`flux-lattice`) | On trial | Wave equation on a flexible 2-D grid; melody packets fly ballistically, bounce off the frame and roll on the grid's slope; cymbal lasers reflect round the frame |
+| 4 | Flux Lattice (`flux-lattice`) | On trial | Wave equation on a flexible 2-D grid that kicks bend and claps snap; each melody note releases a light pulse that bounces off the frame and is thrown by the grid's slope; cymbal lasers reflect round the frame |
 
 ### Story
 
