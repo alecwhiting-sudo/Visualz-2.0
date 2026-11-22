@@ -23,6 +23,7 @@ A link ending in `#ink-tide` (or any visualiser id) opens that visualiser direct
 | 3 | Ripple Tank (`ripple-tank`) | On trial | 2-D damped wave equation; 12 note sources at pitch-scaled frequencies interfere, a refracting lens focuses caustics |
 | 4 | Flux Lattice (`flux-lattice`) | On trial | Wave equation on a flexible 2-D grid that kicks bend and claps snap; each melody note releases a light pulse that bounces off the frame and is thrown by the grid's slope; cymbal lasers reflect round the frame |
 | 5 | Deep Voyage (`deep-voyage`) | On trial | 3-D perspective flight; speed from the story energy; noise-tunnel gas clouds; shaded planets with rings; black holes with lens-equation light bending and accretion discs |
+| 6 | Signal Plane (`signal-plane`) | On trial | Perspective data plane: instanced glyph streams race along 12 cables (one per note), split and reverse on claps; ray-cast plane shader for grid, cables, scan lines and laser-sheet smoke; wireframe globes, ringed planets, moons and gravity wells pass beneath |
 
 ### Story
 
