@@ -1508,7 +1508,11 @@ class RippleTank {
 // are on, and a variation number. A default is built from the analysis (build up to the drop, then
 // follow the music; sections that sound alike share a letter and repeats get a new variation),
 // and the Story tab edits it. Every visualiser reads it through STORY below.
-const LAYER_NAMES = { grid: "Grid", kicks: "Kick waves", claps: "Clap snaps", packets: "Melody pulses", lasers: "Cymbal lasers" };
+const LAYER_NAMES = { grid: "Grid", kicks: "Kick waves", claps: "Clap snaps", packets: "Melody pulses", lasers: "Cymbal lasers",
+                      critters: "Critters", friends: "Friends & bursts", sparkles: "Sparkles" };
+// effects that have no rule of their own in the default story copy one that does
+const LAYER_LIKE = { critters: "packets", friends: "claps", sparkles: "lasers" };
+const layerOn = (sec, k) => k in sec.layers ? !!sec.layers[k] : LAYER_LIKE[k] && LAYER_LIKE[k] in sec.layers ? !!sec.layers[LAYER_LIKE[k]] : sec.layers.kicks !== false;
 const SHAPES = { hold: "Hold", build: "Build", fade: "Fade out", follow: "Follow music" };
 const STORY_SIMILAR = 0.75;       // how alike two sections must sound to share a letter (lower = stricter)
 
@@ -1562,6 +1566,7 @@ function autoStory(F) {
       L = { grid: true, packets: true, kicks: true, claps: true, lasers: !low };
     }
     seen[th] = (seen[th] ?? -1) + 1;
+    for (const [k, like] of Object.entries(LAYER_LIKE)) L[k] = L[like];
     sections.push({ start: c.start, end: c.end, theme: th, occ: seen[th] + 1, level: +level.toFixed(2), shape, variation: seen[th] % 4, layers: L });
   });
   return { auto: true, drop, sig: n + ":" + Math.round(F.duration), sections };
@@ -1581,7 +1586,7 @@ function evalStory(S, F) {
       else if (sec.shape === "fade") e = sec.level * (1 - u) + 0.08 * u;
       else if (sec.shape === "follow") e = sec.level * (0.6 + 0.4 * F.energySlow[i]);
       raw[i] = e; variant[i] = sec.variation; theme[i] = sec.theme;
-      for (const k in layers) layers[k][i] = (k in sec.layers ? sec.layers[k] : sec.layers.kicks !== false) ? 1 : 0;
+      for (const k in layers) layers[k][i] = layerOn(sec, k) ? 1 : 0;
     }
     const last = Math.max(0, f1 - 1);
     prev = sec.shape === "fade" ? 0.08 : sec.shape === "follow" ? sec.level * (0.6 + 0.4 * F.energySlow[last]) : sec.level;
@@ -1841,6 +1846,298 @@ class FluxLattice {
   stats() { return [["melody pulses", this.packets.length], ["lasers", this.lasers.length], ["points", (this.points || 0).toLocaleString()]]; }
 }
 
+// =========================== VISUALISER 5: CRITTER BLOOM ===================
+// Little pixel critters (one per melody note) wander, sway and hop to the beat. Claps send friends
+// that chase them; when a friend catches a critter they spin together, a heart pops up, and on the
+// next kick they burst into a light explosion. Steering forces (wander, separation, huddle, chase,
+// springs) keep it organic; the story's variation picks the dance: wander, orbit, conga or popcorn.
+const CRIT = {
+  SEED: 33,
+  MAX_CRITTERS: 60, MAX_FRIENDS: 12,
+  PIXEL: 7,                         // size of one sprite pixel, px
+  SPEED: 170,                       // critter cruising speed, px/s
+  FRIEND_SPEED: 340,                // friends are faster: they're chasing
+  LIFE: 10,                         // seconds a critter stays before wandering off
+  HOP: 40,                          // kick: hop height, px
+  SWAY: 140,                        // kick: the swarm sways one way, turning round every bar
+  HUDDLE: 0.8,                      // bass: pull towards the middle
+  SWIRL: 70,                        // low mids: swirl round the middle
+  BOND_TIME: 0.5,                   // seconds a pair spins together before bursting (on a kick)
+  BURST: 70, BURST_SPEED: 520,      // light explosion: sparks and their speed
+  SPRITE_INT: 0.3,
+  TRAIL: 0.35, GLOW: 0.9, EXPOSURE: 1.5, FADE_IN: 1.5, FADE_OUT: 3.0,
+  PALETTE_LOCK: -1,
+};
+const CRIT_SLIDERS = [
+  ["GLOW", "Glow", 0, 2.5, 0.05],
+  ["EXPOSURE", "Exposure", 0.6, 3, 0.05],
+  ["TRAIL", "Trails", 0.3, 0.9, 0.01],
+  ["PIXEL", "Critter size", 3, 10, 0.5],
+  ["SPEED", "Speed", 40, 400, 10],
+  ["HOP", "Kick hop", 0, 120, 2],
+  ["FRIEND_SPEED", "Friend speed", 100, 700, 10],
+  ["BURST", "Burst size", 10, 200, 5],
+];
+// Original pixel creatures: # body, o eye (lit), . empty. Two frames each, swapped on every kick.
+const SPRITES = {
+  critter: [[
+    "...#####...",
+    ".#########.",
+    "##oo###oo##",
+    "##o.###o.##",
+    "###########",
+    "####...####",
+    ".#########.",
+    ".#.#...#.#.",
+  ], [
+    "...#####...",
+    ".#########.",
+    "##oo###oo##",
+    "##o.###o.##",
+    "###########",
+    "####...####",
+    ".#########.",
+    "#.#.....#.#",
+  ]],
+  friend: [[
+    ".#.....#.",
+    ".##...##.",
+    ".#######.",
+    "##o###o##",
+    "#########",
+    "###.#.###",
+    ".#######.",
+    "..#...#..",
+  ], [
+    ".#.....#.",
+    ".##...##.",
+    ".#######.",
+    "##o###o##",
+    "#########",
+    "###.#.###",
+    ".#######.",
+    ".#.....#.",
+  ]],
+  heart: [[".#.#.", "#####", "#####", ".###.", "..#.."]],
+};
+
+class CritterBloom {
+  constructor(F) {
+    this.F = F; this.frame = -1; this.rng = makeRng(CRIT.SEED);
+    this.critters = []; this.friends = []; this.bonds = []; this.sparks = []; this.twinkles = [];
+    this.pal = PALETTES[0].map(c => c.slice());
+    this.swayDir = 1; this.kicks = 0; this.anim = 0; this.E = 1; this.id = 0;
+  }
+  dispose() {}
+
+  edgePoint(margin) {               // a random point just outside the frame
+    const W = CONFIG.W, H = CONFIG.H, r = this.rng(), side = Math.floor(this.rng() * 4);
+    return side === 0 ? [-margin, r * H] : side === 1 ? [W + margin, r * H] : side === 2 ? [r * W, -margin] : [r * W, H + margin];
+  }
+
+  step(i) {
+    const C = CRIT, F = this.F, rng = this.rng, W = CONFIG.W, H = CONFIG.H, [cx, cy] = CONFIG.CENTER, t = i * DT;
+    this.frame = i;
+    const E = STORY.energy(i), v = STORY.variant(i); this.E = E;
+    const Lc = STORY.layer("critters", i), Lf = STORY.layer("friends", i), Ls = STORY.layer("sparkles", i);
+    this.Lc = Lc;
+    const target = PALETTES[C.PALETTE_LOCK >= 0 ? C.PALETTE_LOCK : STORY.palette(i, F)];
+    const kp = 1 - Math.exp(-1.2 * DT);
+    for (let a = 0; a < 4; a++) for (let c = 0; c < 3; c++) this.pal[a][c] += (target[a][c] - this.pal[a][c]) * kp;
+    const kick = F.kickHits.has(i);
+    if (kick) { this.kicks++; this.anim ^= 1; if (this.kicks % 4 === 0) this.swayDir = -this.swayDir; }
+
+    // melody: each note brings in a critter of its colour
+    const note = F.melNotes.get(i);
+    if (note && Lc > 0.05 && rng() < Lc * (0.5 + 0.5 * E)) {
+      if (this.critters.length >= C.MAX_CRITTERS) { const old = this.critters.find(c => !c.bonded && !c.leaving); if (old) old.leaving = true; }
+      if (this.critters.length < C.MAX_CRITTERS + 10) {
+        const [x, y] = this.edgePoint(40);
+        this.critters.push({ id: this.id++, x, y, vx: (cx - x) * 0.3, vy: (cy - y) * 0.3, k: note.k, col: STRING_COLORS[note.k].map(c => 0.35 + 0.65 * c),
+          age: 0, life: C.LIFE * (0.6 + 0.8 * rng()), wa: rng() * 6.283, squash: 0, blink: 0, leaving: false, bonded: false, idx: this.id, hopT: 9, hopH: 0 });
+      }
+    }
+    // claps: a friend arrives to chase someone
+    if (F.snareHits.has(i) && F.snareHits.get(i) >= FLUX.CLAP_MIN && Lf > 0.05 && this.friends.length < C.MAX_FRIENDS && rng() < Lf) {
+      const [x, y] = this.edgePoint(40);
+      this.friends.push({ x, y, vx: 0, vy: 0, target: null, age: 0, bonded: false, squash: 0 });
+    }
+    // hats: blinks and sparkles
+    if (F.hatHits.has(i) && Ls > 0.05) {
+      const n = Math.round(1 + 3 * F.hatHits.get(i) * Ls * E);
+      for (let k = 0; k < n && this.critters.length; k++) {
+        const c = this.critters[Math.floor(rng() * this.critters.length)];
+        c.blink = 4; this.twinkles.push({ x: c.x + (rng() - 0.5) * 60, y: c.y - 30 - rng() * 30, life: 0.4, max: 0.4 });
+      }
+    }
+
+    // critters: steering forces
+    const bass = 0.6 * F.sub[i] + 0.4 * F.bass[i], spd = C.SPEED * (0.6 + 0.6 * E);
+    let mx = 0, my = 0; for (const c of this.critters) { mx += c.x; my += c.y; }
+    if (this.critters.length) { mx /= this.critters.length; my /= this.critters.length; }
+    const leader = q => [cx + 380 * Math.sin(0.5 * q), cy + 620 * Math.sin(0.33 * q + 1)];
+    this.critters.forEach((c, n) => {
+      c.age += DT; c.hopT += DT; if (c.age > c.life && !c.bonded) c.leaving = true;
+      if (c.blink > 0) c.blink--; c.squash *= 0.82;
+      if (c.bonded) return;                                    // the bond moves bonded critters
+      let ax = 0, ay = 0;
+      c.wa += rng.normal(0, 1) * 3 * DT;                        // wander
+      ax += Math.cos(c.wa) * 120; ay += Math.sin(c.wa) * 120;
+      if (c.leaving) {                                                                // time to go: head out, ignore the dance
+        const dx = c.x - cx, dy = c.y - cy, d = Math.hypot(dx, dy) + 1e-3; ax += dx / d * 600; ay += dy / d * 600;
+      } else if (v === 0) { ax += (mx - c.x) * 0.25; ay += (my - c.y) * 0.25; }        // loose swarm
+      else if (v === 1) {                                                             // orbit round the middle
+        const dx = c.x - cx, dy = c.y - cy, r = Math.hypot(dx, dy) + 1e-3, R = 260 + (c.idx % 3) * 110;
+        ax += dx / r * (R - r) * 2 - dy / r * 160; ay += dy / r * (R - r) * 2 + dx / r * 160;
+      } else if (v === 2) {                                                           // conga line
+        const [lx, ly] = leader(t - (n % 30) * 0.22); ax += (lx - c.x) * 3; ay += (ly - c.y) * 3;
+      } else {                                                                        // popcorn: gravity and a floor
+        ay += 700;
+        if (c.y > H * 0.82) { c.y = H * 0.82; c.vy = -Math.abs(c.vy) * 0.35; }
+      }
+      if (!c.leaving) {
+        ax += (this.swayDir * C.SWAY * E - c.vx) * 1.2;                               // the swarm sways, turning each bar
+        ax += (cx - c.x) * C.HUDDLE * bass; ay += (cy - c.y) * C.HUDDLE * bass;       // bass huddle
+      }
+      const sw = C.SWIRL * F.lowmid[i];
+      ax += -(c.y - cy) / 400 * sw; ay += (c.x - cx) / 400 * sw;                      // low-mid swirl
+      for (const o of this.critters) {                                                // personal space
+        if (o === c) continue;
+        const dx = c.x - o.x, dy = c.y - o.y, d2 = dx * dx + dy * dy;
+        if (d2 < 75 * 75 && d2 > 1) { const d = Math.sqrt(d2), f = (75 - d) * 14; ax += dx / d * f; ay += dy / d * f; }
+      }
+      if (!c.leaving) {                                                               // soft walls
+        const m = 80;
+        if (c.x < m) ax += (m - c.x) * 12; if (c.x > W - m) ax -= (c.x - W + m) * 12;
+        if (c.y < m) ay += (m - c.y) * 12; if (c.y > H - m) ay -= (c.y - H + m) * 12;
+      }
+      if (kick) {                                                                     // a little bounce on every kick
+        c.squash = 1; c.hopT = 0; c.hopH = C.HOP * (0.5 + 0.5 * E) * (0.6 + 0.4 * rng());
+        if (v === 3) c.vy -= 12 * c.hopH;                                             // popcorn: a real jump
+      }
+      c.vx += ax * DT; c.vy += ay * DT;
+      c.vx *= 1 - 1.4 * DT; c.vy *= 1 - 1.4 * DT;
+      const s = Math.hypot(c.vx, c.vy), cap = spd * (c.leaving ? 2 : 1) * (v === 3 ? 3 : 1.6);
+      if (s > cap) { c.vx *= cap / s; c.vy *= cap / s; }
+      c.x += c.vx * DT; c.y += c.vy * DT;
+    });
+    this.critters = this.critters.filter(c => !(c.leaving && (c.x < -120 || c.x > W + 120 || c.y < -120 || c.y > H + 120)));
+
+    // friends chase the nearest free critter, predicting where it's going
+    for (const f of this.friends) {
+      f.age += DT; f.squash *= 0.82; if (kick) f.squash = 1;
+      if (f.bonded) continue;
+      if (!f.target || !this.critters.includes(f.target) || f.target.bonded || f.target.leaving) {
+        let best = null, bd = Infinity;
+        for (const c of this.critters) {
+          if (c.bonded || c.leaving || this.friends.some(o => o !== f && o.target === c)) continue;
+          const d = Math.hypot(c.x - f.x, c.y - f.y); if (d < bd) { bd = d; best = c; }
+        }
+        f.target = best;
+      }
+      let ax = 0, ay = 0;
+      if (f.target) {
+        const tx = f.target.x + f.target.vx * 0.3, ty = f.target.y + f.target.vy * 0.3, d = Math.hypot(tx - f.x, ty - f.y) + 1e-3;
+        const sp = C.FRIEND_SPEED * (0.8 + 0.4 * E);
+        ax = (tx - f.x) / d * sp * 4 - f.vx * 2; ay = (ty - f.y) / d * sp * 4 - f.vy * 2;
+        if (Math.hypot(f.target.x - f.x, f.target.y - f.y) < 40) {                  // caught: they bond
+          f.bonded = true; f.target.bonded = true;
+          this.bonds.push({ a: f.target, b: f, t: 0, ang: Math.atan2(f.y - f.target.y, f.x - f.target.x) });
+        }
+      } else {                                                                        // nobody to chase: wander off
+        f.idle = (f.idle || 0) + DT;
+        const dx = f.x - cx, dy = f.y - cy, d = Math.hypot(dx, dy) + 1e-3, out = f.idle > 2 ? 400 : -100;
+        ax = dx / d * out - f.vx; ay = dy / d * out - f.vy;
+      }
+      f.vx += ax * DT; f.vy += ay * DT; f.x += f.vx * DT; f.y += f.vy * DT;
+    }
+    this.friends = this.friends.filter(f => f.bonded || (f.age < 14 && f.x > -150 && f.x < W + 150 && f.y > -150 && f.y < H + 150));
+
+    // bonds: the pair spins together, then bursts on a kick
+    for (const b of this.bonds) {
+      b.t += DT;
+      const mxb = (b.a.x + b.b.x) / 2, myb = (b.a.y + b.b.y) / 2, r = 26 * (1 - 0.5 * Math.min(1, b.t / 1.5));
+      b.ang += (4 + 6 * b.t) * DT;                                // spin faster and closer
+      b.a.x = mxb - Math.cos(b.ang) * r; b.a.y = myb - Math.sin(b.ang) * r;
+      b.b.x = mxb + Math.cos(b.ang) * r; b.b.y = myb + Math.sin(b.ang) * r;
+      if ((b.t > C.BOND_TIME && kick) || b.t > 2.2) {
+        b.done = true;
+        const n = Math.round(C.BURST * (0.5 + 0.5 * E)), cols = [b.a.col, this.pal[2], [1, 1, 1]];
+        for (let k = 0; k < n; k++) {
+          const a = rng() * 6.283, sp = C.BURST_SPEED * (0.3 + 0.7 * rng()) * (0.6 + 0.4 * E);
+          this.sparks.push({ x: mxb, y: myb, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.6 + 0.8 * rng(), age: 0, col: cols[k % 3] });
+        }
+        this.sparks.push({ x: mxb, y: myb, vx: 0, vy: 0, life: 0.25, age: 0, col: [1, 1, 1], flash: true });
+      }
+    }
+    const gone = new Set();
+    for (const b of this.bonds) if (b.done) { gone.add(b.a); gone.add(b.b); }
+    this.bonds = this.bonds.filter(b => !b.done);
+    this.critters = this.critters.filter(c => !gone.has(c)); this.friends = this.friends.filter(f => !gone.has(f));
+
+    // sparks and twinkles
+    for (const s of this.sparks) { s.age += DT; s.vx *= 1 - 2.2 * DT; s.vy *= 1 - 2.2 * DT; s.vy += 60 * DT; s.x += s.vx * DT; s.y += s.vy * DT; }
+    this.sparks = this.sparks.filter(s => s.age < s.life);
+    if (this.sparks.length > 2500) this.sparks.splice(0, this.sparks.length - 2500);
+    for (const tw of this.twinkles) tw.life -= DT;
+    this.twinkles = this.twinkles.filter(tw => tw.life > 0);
+  }
+
+  sprite(r, n, rows, x, y, P, col, I, sx, sy, blink) {
+    const h = rows.length, w = rows[0].length, o = P / 3;
+    for (let rr = 0; rr < h; rr++) for (let cc = 0; cc < w; cc++) {
+      const ch = rows[rr][cc]; if (ch === ".") continue;
+      const eye = ch === "o" && !blink, c = eye ? [1, 1, 1] : col, it = eye ? I * 1.8 : I;
+      const px = x + (cc - (w - 1) / 2) * P * sx, py = y + (rr - (h - 1) / 2) * P * sy;
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) r.pushDot(n++, px + a * o * sx, py + b * o * sy, c[0], c[1], c[2], it);
+    }
+    return n;
+  }
+
+  draw() {
+    const r = renderer, gl = r.gl, C = CRIT, F = this.F, i = this.frame, s = r.scale;
+    const [cx, cy] = CONFIG.CENTER, W = CONFIG.W, H = CONFIG.H, hot = this.pal[2];
+    gl.bindFramebuffer(gl.FRAMEBUFFER, r.acc.fb); gl.viewport(0, 0, r.acc.w, r.acc.h); gl.bindVertexArray(r.vao);
+    gl.enable(gl.BLEND); gl.blendColor(0, 0, 0, C.TRAIL); gl.blendFunc(gl.ZERO, gl.CONSTANT_ALPHA);
+    gl.useProgram(r.pFade.p); gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    let n = 0;
+    const I = C.SPRITE_INT * (0.7 + 0.5 * this.E), P = C.PIXEL;
+    for (const sp of this.sparks) {                         // light explosions
+      const f = 1 - sp.age / sp.life;
+      if (sp.flash) { for (let k = 0; k < 40; k++) { const a = k * 0.157, rr = 10 + 50 * (1 - f); r.pushDot(n++, sp.x + Math.cos(a) * rr, sp.y + Math.sin(a) * rr, 1, 1, 1, 0.8 * f); } continue; }
+      for (let k = 0; k < 4; k++) r.pushDot(n++, sp.x + (k & 1) * 1.5, sp.y + (k >> 1) * 1.5, sp.col[0], sp.col[1], sp.col[2], 0.55 * f * f);
+    }
+    const bob = q => Math.sin(i * DT * 6 + q) * 3;
+    for (const c of this.critters) {                        // critters, squashing on each hop
+      const sq = c.squash, fade = Math.min(1, c.age / 0.4);
+      const u = Math.min(1, c.hopT / 0.3), hop = c.hopH * 4 * u * (1 - u);          // up and back down
+      n = this.sprite(r, n, SPRITES.critter[this.anim], c.x, c.y + bob(c.idx) - hop, P, c.col, I * fade, 1 + 0.18 * sq, 1 - 0.22 * sq, c.blink > 0);
+    }
+    for (const f of this.friends) {                         // friends, flapping their ears
+      n = this.sprite(r, n, SPRITES.friend[this.anim], f.x, f.y, P * 0.85, hot.map(v => 0.4 + 0.6 * v), I * Math.min(1, f.age / 0.3), 1 + 0.15 * f.squash, 1 - 0.18 * f.squash, false);
+    }
+    for (const b of this.bonds) {                           // a heart pops up over each pair
+      const mxb = (b.a.x + b.b.x) / 2, myb = (b.a.y + b.b.y) / 2, pulse = 1 + 0.25 * Math.sin(b.t * 18);
+      n = this.sprite(r, n, SPRITES.heart[0], mxb, myb - 70 - 20 * Math.min(1, b.t), P * 0.8 * pulse, [1, 0.35, 0.6], I * 1.4, 1, 1, false);
+    }
+    for (const tw of this.twinkles) {                       // twinkles: a little four-point star
+      const f = tw.life / tw.max, L = 10 * f;
+      for (let k = -4; k <= 4; k++) { r.pushDot(n++, tw.x + k * L / 4, tw.y, 1, 1, 0.9, 0.5 * f); r.pushDot(n++, tw.x, tw.y + k * L / 4, 1, 1, 0.9, 0.5 * f); }
+    }
+    const D = r.pDots, zoom = 1 + 0.015 * F.kick[i] * this.E;
+    gl.bindVertexArray(r.dotVao); gl.bindBuffer(gl.ARRAY_BUFFER, r.dotBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, r.dots.subarray(0, n * 6), gl.STREAM_DRAW);
+    gl.useProgram(D.p); gl.uniform1f(D.u.u_mult, s);
+    gl.uniform2f(D.u.u_center, cx, cy); gl.uniform2f(D.u.u_rot, 1, 0); gl.uniform1f(D.u.u_zoom, zoom); gl.uniform2f(D.u.u_world, W, H);
+    gl.drawArrays(gl.POINTS, 0, n);
+    gl.disable(gl.BLEND);
+    this.points = n;
+    r.compose({ F, frame: i, bg: this.pal[0], glow: C.GLOW, exposure: C.EXPOSURE, fadeIn: C.FADE_IN, fadeOut: C.FADE_OUT });
+  }
+  stats() { return [["critters", this.critters.length], ["friends", this.friends.length], ["pairs", this.bonds.length], ["sparks", this.sparks.length]]; }
+}
+
 // =========================== VISUALISER MENU ===============================
 // Every visualiser shares the analysis, playback, recording and glow pass, and brings its own
 // physics, drawing, settings and "how the music drives it" table.
@@ -1916,6 +2213,24 @@ const VISUALISERS = [
     ],
     layers: ["grid", "kicks", "claps", "packets", "lasers"],
     create: F => new FluxLattice(F),
+  },
+  {
+    id: "critter-bloom", name: "Critter Bloom", status: "On trial",
+    blurb: "Little pixel critters, friends that chase them, and bursts of light",
+    config: CRIT, sliders: CRIT_SLIDERS, particles: false,
+    hints: { sub: "huddle", kick: "hop", snare: "friends", lowmid: "swirl", hat: "sparkle", centroid: "–", melody: "critters" },
+    mapping: [
+      ["Melody", "Each note brings in a little critter of that colour; they wander, sway and leave after a while"],
+      ["Kick", "Everyone hops with a squash and stretch, the critters change step, and the swarm sways, turning round every bar"],
+      ["Clap", "A friend flies in and chases the nearest critter; when it catches one they spin together under a heart, then burst into light on the next kick"],
+      ["Sub + bass", "The swarm huddles towards the middle"],
+      ["Low mids", "The swarm swirls"],
+      ["Hats", "Eyes blink and little stars twinkle"],
+      ["Story energy", "How lively it is: speed, hops and the size of the bursts"],
+      ["Story variation", "The dance: loose swarm, orbit, conga line or popcorn hops"],
+    ],
+    layers: ["critters", "friends", "sparkles"],
+    create: F => new CritterBloom(F),
   },
 ];
 VISUALISERS.forEach(v => { v.defaults = JSON.parse(JSON.stringify(v.config)); });
@@ -2054,7 +2369,7 @@ function initStory() {
   let s = null;
   try { s = JSON.parse(localStorage.getItem(storyKey()) || "null"); } catch (_) {}
   if (!s || !s.sections || s.sig !== app.F.secEnergy.length + ":" + Math.round(app.F.duration)) s = autoStory(app.F);
-  for (const sec of s.sections) for (const k in LAYER_NAMES) if (!(k in sec.layers)) sec.layers[k] = sec.layers.kicks !== false;
+  for (const sec of s.sections) for (const k in LAYER_NAMES) if (!(k in sec.layers)) sec.layers[k] = layerOn(sec, k);
   app.story = s; app.selSec = Math.min(app.selSec, s.sections.length - 1);
   app.storyEval = evalStory(s, app.F);
   renderSectionEditor(); drawStory();
@@ -2100,7 +2415,8 @@ function renderSectionEditor() {
     chips.appendChild(b);
   }
   $("seVar").value = String(sec.variation);
-  $("seVarNote").textContent = "Changes where kicks land, where lasers fire from, and the palette.";
+  $("seVarNote").textContent = app.vis.id === "critter-bloom" ? "Changes the dance (swarm, orbit, conga, popcorn) and the palette."
+    : "Changes where kicks land, where lasers fire from, and the palette.";
 }
 $("seLevel").addEventListener("input", e => {
   const sec = app.story.sections[app.selSec]; sec.level = +e.target.value;
@@ -2119,7 +2435,8 @@ function drawStory() {
   const F = app.F, S = app.story, ev = app.storyEval, X = t => t / F.duration * w;
   const lanes = app.vis.layers, laneH = 13, lanesTop = h - lanes.length * (laneH + 4) - 6;
   const top = 24, bot = lanesTop - 10;
-  const LANE_COLS = { grid: "#7aa2ff", kicks: "#ff8a5c", claps: "#ffd36b", packets: "#c38bff", lasers: "#7ff0d8" };
+  const LANE_COLS = { grid: "#7aa2ff", kicks: "#ff8a5c", claps: "#ffd36b", packets: "#c38bff", lasers: "#7ff0d8",
+                      critters: "#9be37a", friends: "#ff9ec4", sparkles: "#fff1a8" };
   S.sections.forEach((sec, s) => {
     const x0 = X(sec.start), x1 = X(sec.end);
     if (s === app.selSec) { g.fillStyle = photon; g.globalAlpha = 0.14; g.fillRect(x0, 0, x1 - x0, h); g.globalAlpha = 1; }
