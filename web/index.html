@@ -29,7 +29,7 @@ body {
   padding-right: max(16px, env(safe-area-inset-right, 0px));
   padding-block: 16px 32px;
 }
-.app { display: grid; gap: 20px; max-width: 1560px; margin: 0 auto; grid-template-columns: minmax(0, 1fr); --stage-w: min(100%, calc(82vh * 9 / 16)); }
+.app { display: grid; gap: 20px; max-width: 1560px; margin: 0 auto; grid-template-columns: minmax(0, 1fr); --ar: 0.5625; --stage-w: min(100%, calc(82vh * var(--ar))); }
 .rack-head { grid-column: 1 / -1; display: flex; gap: 8px; min-width: 0; align-items: stretch; }
 .vis-menu { display: flex; gap: 8px; overflow-x: auto; flex: 1; min-width: 0; padding-bottom: 2px; }
 .tabs { display: flex; flex-direction: column; gap: 4px; flex: none; }
@@ -69,7 +69,7 @@ h1 small { font-family: var(--font-mono); font-weight: 400; font-size: 0.7rem; c
 
 .stage-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .stage {
-  position: relative; aspect-ratio: 9 / 16; width: var(--stage-w); max-width: 100%;
+  position: relative; aspect-ratio: var(--ar); width: var(--stage-w); max-width: 100%;
   margin: 0 auto; background: #000; border-radius: 14px; overflow: hidden; border: 1px solid var(--line);
 }
 .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
@@ -145,12 +145,13 @@ table.map { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-to
 table.map td { padding: 6px 0; border-top: 1px solid var(--line); vertical-align: top; }
 table.map td:first-child { color: var(--photon); font-family: var(--font-mono); font-size: 0.72rem; width: 34%; padding-right: 10px; }
 .save-out { display: flex; flex-direction: column; gap: 8px; }
+.fmt-row { grid-template-columns: 4.5rem minmax(0, 1fr); }
 /* Desktop: the stage takes the window height, the controls spread across two columns beside it,
    so the whole app fits on one screen without scrolling. */
 @media (min-width: 1000px) {
   body { padding-block: 12px; }
   .app { grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 18px;
-         --stage-w: max(300px, min(calc((100vh - 118px) * 9 / 16), 44vw)); }
+         --stage-w: max(300px, min(calc((100vh - 118px) * var(--ar)), 44vw)); }
   .stage-col { gap: 8px; }
   .rack { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
   .rack-col { gap: 12px; }
@@ -172,7 +173,7 @@ table.map td:first-child { color: var(--photon); font-family: var(--font-mono); 
   <div class="stage-col">
     <header class="brand">
       <h1><span id="visName">Gravity Harp</span> <small>Visualz · POC</small></h1>
-      <span class="tag">1080 × 1920 · 30 fps</span>
+      <span class="tag" id="fmtTag">1080 × 1920 · 30 fps</span>
     </header>
     <div class="stage" id="stage">
       <canvas id="gl" width="540" height="960" aria-label="Visualiser output"></canvas>
@@ -240,6 +241,11 @@ table.map td:first-child { color: var(--photon); font-family: var(--font-mono); 
         <button class="rec" id="recBtn" disabled><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></svg><span id="recLabel">Record video</span></button>
         <button id="stillBtn" disabled><svg class="i" viewBox="0 0 24 24"><path d="M4 5h3l2-2h6l2 2h3v14H4zm8 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10z"/></svg>Save still</button>
       </div>
+      <div class="ctl fmt-row"><label for="fmtSel">Format</label><select id="fmtSel">
+        <option value="vertical">Vertical 9:16 · Reels, TikTok, Shorts</option>
+        <option value="square">Square 1:1 · feed posts</option>
+        <option value="landscape">Landscape 16:9 · YouTube</option>
+      </select></div>
       <div class="save-out" id="saveOut" hidden>
         <button class="primary" id="saveVidBtn">Save video</button>
       </div>
@@ -268,8 +274,8 @@ table.map td:first-child { color: var(--photon); font-family: var(--font-mono); 
       </div>
       <div class="pair" style="align-items:end">
         <label for="resSel">Render size<select id="resSel">
-          <option value="0.5">540 × 960 (fast)</option>
-          <option value="1">1080 × 1920 (full)</option>
+          <option value="0.5" id="resHalf">540 × 960 (fast)</option>
+          <option value="1" id="resFull">1080 × 1920 (full)</option>
         </select></label>
         <button id="resetBtn">Reset settings</button>
       </div>
@@ -1512,11 +1518,13 @@ const LAYER_NAMES = { grid: "Grid", kicks: "Kick waves", claps: "Clap snaps", pa
                       nebula: "Gas clouds", planets: "Planets", blackholes: "Black holes", comets: "Comets & novas",
                       streams: "Data streams", field: "Number field", wireframes: "Wireframes", smoke: "Smoke",
                       city: "City", data: "Data links", sky: "Sky membrane", scans: "Scan planes",
-                      trees: "Trees", leaves: "Leaves", rain: "Data rain", beings: "Light beings" };
+                      trees: "Trees", leaves: "Leaves", rain: "Data rain", beings: "Light beings",
+                      ice: "Ice & cracks", aurora: "Aurora", snow: "Data snow", whales: "Whales" };
 // effects that have no rule of their own in the default story copy one that does
 const LAYER_LIKE = { nebula: "grid", comets: "packets", planets: "kicks", blackholes: "lasers", streams: "packets", field: "grid", wireframes: "kicks",
                      city: "grid", data: "packets", sky: "kicks", scans: "claps",
-                     trees: "grid", rain: "packets", beings: "grid" };
+                     trees: "grid", rain: "packets", beings: "grid",
+                     ice: "grid", aurora: "packets", snow: "lasers", whales: "kicks" };
 const LAYER_OFF = { smoke: true };      // used sparingly: off unless a chapter turns it on
 const layerOn = (sec, k) => k in sec.layers ? !!sec.layers[k] : LAYER_OFF[k] ? false
   : LAYER_LIKE[k] && LAYER_LIKE[k] in sec.layers ? !!sec.layers[LAYER_LIKE[k]] : sec.layers.kicks !== false;
@@ -2175,7 +2183,7 @@ class DeepVoyage {
 // the plane, lit like a laser sheet. Mostly white on black; the story's palette gives one accent.
 const SIG = {
   SEED: 55,
-  FOCAL: 1000, PITCH: 0.42, CAM_H: 140, SCREEN_Y: 830,    // camera: focal length, look-down angle, height
+  FOCAL: 1000, PITCH: 0.42, CAM_H: 140, SCREEN_Y: 0.432,  // camera: focal length, look-down angle, height, centre line (x height)
   CRUISE: 300, FLY: 2600,           // camera speed: cruise + fly x energy^2 (units/s)
   STREAM_SPEED: 3200,               // how fast data races along the cables
   GLYPH: 38,                        // character height on the plane (world units)
@@ -2313,7 +2321,7 @@ class SignalPlane {
     const x2 = rx * cy - rz * sy, z2 = rx * sy + rz * cy, cp = Math.cos(c.pitch), sp = Math.sin(c.pitch);
     const zc = -ry * sp + z2 * cp, yc = ry * cp + z2 * sp;
     if (zc < 5) return null;
-    return [CONFIG.W / 2 + x2 / zc * SIG.FOCAL, SIG.SCREEN_Y - yc / zc * SIG.FOCAL, zc];
+    return [CONFIG.W / 2 + x2 / zc * SIG.FOCAL, SIG.SCREEN_Y * CONFIG.H - yc / zc * SIG.FOCAL, zc];
   }
   spawnStream(k, sp, len, col) {
     const C = SIG, cam = this.cam, toward = sp < 0;
@@ -2422,7 +2430,7 @@ class SignalPlane {
   draw() {
     const r = renderer, gl = r.gl, C = SIG, F = this.F, i = this.frame, s = r.scale, cam = this.cam;
     const W = CONFIG.W, H = CONFIG.H, acc = this.pal[3], E = this.E;
-    const camU = u => { gl.uniform3f(u.u_cam, cam.x, cam.y, cam.z); gl.uniform1f(u.u_pitch, cam.pitch); gl.uniform1f(u.u_yaw, cam.yaw); gl.uniform1f(u.u_f, C.FOCAL); gl.uniform2f(u.u_cs, W / 2, C.SCREEN_Y); gl.uniform2f(u.u_world, W, H); };
+    const camU = u => { gl.uniform3f(u.u_cam, cam.x, cam.y, cam.z); gl.uniform1f(u.u_pitch, cam.pitch); gl.uniform1f(u.u_yaw, cam.yaw); gl.uniform1f(u.u_f, C.FOCAL); gl.uniform2f(u.u_cs, W / 2, C.SCREEN_Y * H); gl.uniform2f(u.u_world, W, H); };
     // 1) the plane
     gl.disable(gl.BLEND);
     const pa = new Float32Array(48), ph = new Float32Array(12);
@@ -3081,6 +3089,250 @@ class DataForest {
   stats() { return [["view", FOREST_VIEWS[this.view % 4] || "–"], ["wind", Math.round(this.strength || 0)], ["rain", this.rain.length], ["points", (this.points || 0).toLocaleString()]]; }
 }
 
+// =========================== VISUALISER 9: AURORA SHELF ====================
+// Polar night at the edge of an ice shelf: a wireframe ice plateau ending in a sheer cliff above a
+// rolling dark sea, drifting icebergs, aurora curtains in the sky and a blizzard of data snow. Whales
+// glide slowly just under the surface, now and then blowing a spout of data spray. Kicks crack the
+// ice; melody notes light the aurora in their colours; the story's variation chooses the view.
+const AUR = {
+  SEED: 99, FOCAL: 1050,
+  SWELL: 45,                         // sea swell height (units); the bass raises it
+  CRACK_SPEED: 1600,                 // kick: how fast cracks race across the ice
+  WIND: 260,                         // blizzard wind at full energy (units/s)
+  SNOW: 700,                         // snowflakes around the camera
+  WHALES: 4, WHALE_LEN: 620,
+  ICE_INT: 0.22, SEA_INT: 0.26, AURORA_INT: 1.1, SNOW_INT: 0.8, WHALE_INT: 1.0,
+  GLOW: 1.0, EXPOSURE: 1.9, FADE_IN: 1.5, FADE_OUT: 3.0,
+  PALETTE_LOCK: -1,
+};
+const AUR_SLIDERS = [
+  ["GLOW", "Glow", 0, 2.5, 0.05],
+  ["EXPOSURE", "Exposure", 0.6, 3, 0.05],
+  ["AURORA_INT", "Aurora", 0, 3, 0.05],
+  ["SWELL", "Sea swell", 0, 150, 2],
+  ["WIND", "Blizzard wind", 0, 800, 10],
+  ["CRACK_SPEED", "Crack speed", 200, 4000, 50],
+  ["WHALE_INT", "Whales", 0, 3, 0.05],
+  ["ICE_INT", "Ice lines", 0, 0.6, 0.01],
+];
+const AUR_VIEWS = ["skimming the ice", "aerial", "sky gaze", "round an iceberg"];
+
+class AuroraShelf {
+  constructor(F) {
+    const C = AUR, rng = this.rng = makeRng(C.SEED);
+    this.F = F; this.frame = -1; this.G = sigPrograms(renderer);
+    this.t = 0; this.E = 1; this.ang = 0; this.windAng = -0.4;
+    this.cam = { x: 0, y: 300, z: 1500, yaw: Math.PI, pitch: 0 }; this.camT = null;
+    this.icebergs = [];
+    for (let k = 0; k < 7; k++) {
+      const n = 6 + Math.floor(rng() * 4), R = 120 + rng() * 220, H = 60 + rng() * 160, poly = [];
+      for (let q = 0; q < n; q++) { const a = q / n * 2 * Math.PI + rng() * 0.4; poly.push([Math.cos(a) * R * (0.7 + 0.5 * rng()), Math.sin(a) * R * (0.7 + 0.5 * rng())]); }
+      this.icebergs.push({ x: (rng() - 0.5) * 6000, z: -700 - rng() * 3800, poly, H, top: 0.45 + 0.35 * rng(), rot: rng() * 6.28, rv: (rng() - 0.5) * 0.04, ph: rng() * 6.28 });
+    }
+    this.whales = [];
+    for (let k = 0; k < C.WHALES; k++) this.whales.push({ x: (rng() - 0.5) * 4000, z: -1200 - rng() * 2800, hd: rng() * 6.28, ph: rng() * 6.28, depth: 60, surf: 0, len: C.WHALE_LEN * (0.8 + 0.4 * rng()) });
+    this.cracks = []; this.spray = []; this.glints = [];
+    this.snow = [];
+    for (let k = 0; k < C.SNOW; k++) this.snow.push({ x: (rng() - 0.5) * 3000, y: rng() * 1800, z: (rng() - 0.5) * 3000, g: rng() < 0.3 ? Math.floor(rng() * 16) : -1, ph: rng() * 6.28 });
+    this.curtains = Array.from({ length: 6 }, (_, k) => ({ z: -2200 - k * 420, x0: -3600 + rng() * 800, ph: rng() * 6.28, lit: 0, col: null }));
+    this.pal = PALETTES[0].map(c => c.slice()); this.inst = new Float32Array(11 * 8192);
+  }
+  dispose() {}
+
+  iceY(x, z) { return 140 + 25 * Math.sin(x * 0.0013 + z * 0.0007) + 18 * Math.sin(x * 0.0031 - z * 0.0024) + 10 * Math.sin(z * 0.006); }
+  seaY(x, z) {
+    const t = this.t, A = this.swell;
+    return A * (0.6 * Math.sin(x * 0.0021 + z * 0.0013 - t * 0.9) + 0.4 * Math.sin(x * -0.0011 + z * 0.0029 - t * 1.3) + 0.2 * Math.sin(x * 0.0057 - t * 1.9));
+  }
+  camTarget(v) {
+    const a = this.ang;
+    if (v === 0) return [Math.sin(a * 0.7) * 1600, 320, 900 + Math.cos(a * 0.7) * 250, Math.sin(a * 0.7) * 600, 900, -3200];       // skimming the ice towards the sea
+    if (v === 1) return [Math.sin(a * 0.4) * 3600, 2300, -800 + Math.cos(a * 0.4) * 3600, 0, 0, -1200];                           // aerial
+    if (v === 2) return [Math.sin(a * 0.3) * 900, 70, -900, Math.sin(a * 0.3 + 0.5) * 1500, 1500, -4200];                         // from sea level, up at the aurora
+    const b = this.icebergs[0];                                                                                                  // round an iceberg
+    return [b.x + Math.sin(a * 0.8) * 800, 260, b.z + Math.cos(a * 0.8) * 800, b.x, 80, b.z];
+  }
+
+  step(i) {
+    const C = AUR, F = this.F, rng = this.rng;
+    this.frame = i; this.t = i * DT;
+    const E = STORY.energy(i), v = STORY.variant(i); this.E = E; this.view = v;
+    this.Li = STORY.layer("ice", i); this.La = STORY.layer("aurora", i); this.Ls = STORY.layer("snow", i); this.Lw = STORY.layer("whales", i);
+    const target = PALETTES[C.PALETTE_LOCK >= 0 ? C.PALETTE_LOCK : STORY.palette(i, F)];
+    const kp = 1 - Math.exp(-1.2 * DT);
+    for (let a = 0; a < 4; a++) for (let c = 0; c < 3; c++) this.pal[a][c] += (target[a][c] - this.pal[a][c]) * kp;
+    this.ang += (0.03 + 0.06 * E) * DT;
+    const T = this.camTarget(v % 4); if (!this.camT) this.camT = T.slice();
+    const kc = 1 - Math.exp(-DT / 2.0); for (let k = 0; k < 6; k++) this.camT[k] += (T[k] - this.camT[k]) * kc;
+    const [x, y, z, lx, ly, lz] = this.camT, dx = lx - x, dy = ly - y, dz = lz - z;
+    Object.assign(this.cam, { x, y, z, yaw: Math.atan2(dx, dz), pitch: Math.atan2(-dy, Math.hypot(dx, dz)) });
+    const bass = 0.6 * F.sub[i] + 0.4 * F.bass[i];
+    this.swell = C.SWELL * (0.5 + 1.2 * bass);
+    this.windAng += 0.35 * (F.lowmid[i] - 0.4) * DT;
+    const ws = C.WIND * (0.15 + 0.85 * E) * this.Ls, wx = Math.cos(this.windAng) * ws, wz = Math.sin(this.windAng) * ws;
+    this.wx = wx; this.wz = wz;
+
+    // kicks: a crack races across the ice, forking as it goes
+    if (F.kickHits.has(i) && this.Li > 0.05) {
+      const s = 0.4 + 0.6 * F.kickHits.get(i);
+      const x0 = (rng() - 0.5) * 5000, z0 = 300 + rng() * 2800, a = rng() * 6.28;
+      this.cracks.push({ pts: [[x0, z0]], a, grow: 0, len: 600 + 1400 * s * (0.5 + 0.5 * E), t0: this.t, s, kids: 0 });
+    }
+    for (const c of this.cracks) {
+      if (c.grow < c.len) {
+        const st = C.CRACK_SPEED * DT, last = c.pts[c.pts.length - 1];
+        c.a += rng.normal(0, 0.35); c.grow += st;
+        const p = [last[0] + Math.cos(c.a) * st, last[1] + Math.sin(c.a) * st];
+        if (p[1] > 40) c.pts.push(p); else c.grow = c.len;
+        if (c.kids < 3 && rng() < 0.05) { c.kids++; this.cracks.push({ pts: [p.slice()], a: c.a + (rng() < 0.5 ? 1 : -1) * (0.6 + 0.5 * rng()), grow: 0, len: (c.len - c.grow) * 0.6, t0: this.t, s: c.s * 0.8, kids: 3 }); }
+      }
+    }
+    this.cracks = this.cracks.filter(c => this.t - c.t0 < 4);
+    // melody: a band of aurora lights up in the note's colour
+    const note = F.melNotes.get(i);
+    if (note) { const c = this.curtains[note.k % this.curtains.length]; c.lit = Math.min(1.5, c.lit + 0.6 * (0.5 + note.s)); c.col = STRING_COLORS[note.k].map(q => 0.4 + 0.6 * q); }
+    for (const c of this.curtains) c.lit *= 0.985;
+    // whales: slow and graceful, surfacing now and then; on a clap the nearest surfacer blows
+    for (const w of this.whales) {
+      w.ph += DT * 0.9;
+      w.hd += 0.08 * Math.sin(this.t * 0.07 + w.ph * 0.1) * DT;
+      if (w.z > -800) w.hd += 0.3 * DT; if (Math.abs(w.x) > 3500) w.hd += 0.3 * DT;
+      const sp = 110 * (0.6 + 0.4 * E);
+      w.x += Math.sin(w.hd) * sp * DT; w.z += Math.cos(w.hd) * sp * DT;
+      w.surf = 0.5 + 0.5 * Math.sin(this.t * 0.11 + w.ph * 0.3);
+      w.depth = 12 + 60 * (1 - w.surf);
+    }
+    if (F.snareHits.has(i) && F.snareHits.get(i) >= FLUX.CLAP_MIN && this.Lw > 0.05) {
+      const w = this.whales.slice().sort((a, b) => b.surf - a.surf)[0];
+      const hx = w.x + Math.sin(w.hd) * w.len * 0.32, hz = w.z + Math.cos(w.hd) * w.len * 0.32;
+      for (let k = 0; k < 70; k++) {
+        const a = rng() * 6.28, r = rng() * 60;
+        this.spray.push({ x: hx, y: 0, z: hz, vx: Math.cos(a) * r, vy: 420 + rng() * 380, vz: Math.sin(a) * r, age: 0, life: 1.4 + rng(), g: rng() < 0.35 ? Math.floor(rng() * 16) : -1 });
+      }
+    }
+    for (const p of this.spray) { p.age += DT; p.vy -= 380 * DT; p.x += (p.vx + wx * 0.3) * DT; p.y += p.vy * DT; p.z += (p.vz + wz * 0.3) * DT; }
+    this.spray = this.spray.filter(p => p.age < p.life && p.y > -20);
+    // the blizzard: flakes blow through a box that travels with the camera
+    const cam = this.cam;
+    for (const f of this.snow) {
+      f.x += (wx + 30 * Math.sin(this.t * 1.3 + f.ph)) * DT; f.z += wz * DT; f.y -= (60 + 40 * Math.sin(f.ph)) * DT;
+      if (f.x - cam.x > 1500) f.x -= 3000; if (f.x - cam.x < -1500) f.x += 3000;
+      if (f.z - cam.z > 1500) f.z -= 3000; if (f.z - cam.z < -1500) f.z += 3000;
+      if (f.y < 0) f.y += 1800; if (f.y > 1800) f.y -= 1800;
+    }
+    // hats: ice crystals glint
+    if (F.hatHits.has(i)) for (let k = 0; k < Math.round(8 * F.hatHits.get(i) * (0.4 + E)); k++) this.snow[Math.floor(rng() * this.snow.length)].glint = 1;
+    for (const f of this.snow) if (f.glint) f.glint *= 0.85;
+    for (const b of this.icebergs) b.rot += b.rv * DT;
+  }
+
+  draw() {
+    const r = renderer, gl = r.gl, C = AUR, F = this.F, i = this.frame, s = r.scale, cam = this.cam, E = this.E, t = this.t;
+    const W = CONFIG.W, H = CONFIG.H, [, cold, hot, acc] = this.pal, ice = [0.8, 0.92, 1];
+    gl.bindFramebuffer(gl.FRAMEBUFFER, r.acc.fb); gl.viewport(0, 0, r.acc.w, r.acc.h);
+    gl.disable(gl.BLEND); gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+    let n = 0;
+    const P = (X, Y, Z) => {
+      const rx = X - cam.x, ry = Y - cam.y, rz = Z - cam.z, cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw);
+      const x2 = rx * cy - rz * sy, z2 = rx * sy + rz * cy, cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+      const zc = -ry * sp + z2 * cp, yc = ry * cp + z2 * sp;
+      if (zc < 8) return null;
+      return [W / 2 + x2 / zc * C.FOCAL, H / 2 - yc / zc * C.FOCAL, zc];
+    };
+    const fog = zc => Math.exp(-zc * 0.00014);
+    const poly = (pts, col, it, gap = 2.2) => {
+      let a = P(...pts[0]);
+      for (let q = 1; q < pts.length; q++) {
+        const b = P(...pts[q]);
+        if (a && b && !(Math.max(a[0], b[0]) < -10 || Math.min(a[0], b[0]) > W + 10 || Math.max(a[1], b[1]) < -10 || Math.min(a[1], b[1]) > H + 10)) {
+          const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy);
+          if (L < 3000) { const g2 = gap * (1 + Math.min(1.5, (a[2] + b[2]) / 6000)), m = Math.max(1, Math.ceil(L / g2)), f = it * fog((a[2] + b[2]) / 2) * g2 / 2.2;
+            for (let k = 0; k < m; k++) { const X = a[0] + dx * k / m, Y = a[1] + dy * k / m; if (X > -4 && X < W + 4 && Y > -4 && Y < H + 4) r.pushDot(n++, X, Y, col[0], col[1], col[2], f); } }
+        }
+        a = b;
+      }
+    };
+    const point = (X, Y, Z, col, it) => { const p = P(X, Y, Z); if (p) r.pushDot(n++, p[0], p[1], col[0], col[1], col[2], it * fog(p[2])); return p; };
+
+    // aurora: curtains of vertical rays that ripple, brightened by melody notes
+    if (this.La > 0.02) for (const c of this.curtains) {
+      const col = c.col ? c.col.map((q, k) => q * c.lit / 1.5 + acc[k] * (1 - c.lit / 1.5)) : acc, base = C.AURORA_INT * this.La * (0.35 + 0.65 * E) * (0.4 + 0.6 * Math.min(1, c.lit + 0.3));
+      for (let k = 0; k < 130; k++) {
+        const u = k / 130, X = c.x0 + u * 7000, wave = 260 * Math.sin(u * 7 + t * 0.35 + c.ph) + 120 * Math.sin(u * 19 - t * 0.6), Z = c.z + wave;
+        const y0 = 900 + 160 * Math.sin(u * 5 + t * 0.2 + c.ph), y1 = y0 + 1000 + 700 * (0.5 + 0.5 * Math.sin(u * 11 + t * 0.5 + c.ph)) * (0.6 + 0.4 * c.lit);
+        const a = P(X, y0, Z), b = P(X, y1, Z); if (!a || !b) continue;
+        const m = Math.max(2, Math.ceil(Math.abs(b[1] - a[1]) / 5)), f = base * fog(a[2] * 0.5) * 2;
+        for (let q = 0; q < m; q++) { const uu = q / m, fall = uu < 0.08 ? uu / 0.08 : Math.pow(1 - (uu - 0.08) / 0.92, 1.6); r.pushDot(n++, a[0] + (b[0] - a[0]) * uu, a[1] + (b[1] - a[1]) * uu, col[0], col[1], col[2], f * fall * 0.5); }
+      }
+    }
+    // the ice plateau, its cliff edge, and cracks
+    if (this.Li > 0.02) {
+      const it = C.ICE_INT * this.Li * (0.6 + 0.4 * E);
+      for (let zz = 0; zz <= 4000; zz += 250) { const row = []; for (let xx = -4500; xx <= 4500; xx += 150) row.push([xx, this.iceY(xx, zz), zz]); poly(row, ice, it, 3); }
+      for (let xx = -4500; xx <= 4500; xx += 350) { const col = []; for (let zz = 0; zz <= 4000; zz += 150) col.push([xx, this.iceY(xx, zz), zz]); poly(col, ice, it * 0.7, 3); }
+      for (let xx = -4500; xx <= 4500; xx += 75) { const y = this.iceY(xx, 0); poly([[xx, y, 0], [xx, this.seaY(xx, -5) - 10, -5]], ice, it * 0.8); }
+      for (const c of this.cracks) {
+        const f = Math.max(0, 1 - (t - c.t0) / 4), col = acc.map(q => 0.5 + 0.5 * q);
+        poly(c.pts.map(([px, pz]) => [px, this.iceY(px, pz) + 2, pz]), col, (0.5 + 1.5 * c.s) * f * this.Li);
+      }
+    }
+    // the sea: long swell lines
+    const seaIt = C.SEA_INT * (0.6 + 0.4 * E);
+    for (let zz = -6000; zz <= -40; zz += 220) { const row = []; for (let xx = -6000; xx <= 6000; xx += 200) row.push([xx, this.seaY(xx, zz), zz]); poly(row, cold.map(q => 0.4 + 0.6 * q), seaIt, 3); }
+    // icebergs: bobbing on the swell, with their hidden bulk faint beneath
+    for (const b of this.icebergs) {
+      const bob = this.seaY(b.x, b.z) * 0.7, cr = Math.cos(b.rot), sr = Math.sin(b.rot);
+      const at = (p, k, y) => [b.x + (p[0] * cr - p[1] * sr) * k, y + bob, b.z + (p[0] * sr + p[1] * cr) * k];
+      const ring = (k, y, it) => poly([...b.poly, b.poly[0]].map(p => at(p, k, y)), ice, it);
+      ring(1, 0, 0.5); ring(b.top, b.H, 0.45); ring(1.25, -b.H * 1.6, 0.12);
+      for (const p of b.poly) { poly([at(p, 1, 0), at(p, b.top, b.H)], ice, 0.4); poly([at(p, 1, 0), at(p, 1.25, -b.H * 1.6)], ice, 0.1); }
+    }
+    // whales: wireframe bodies gliding under the surface, tails beating slowly
+    if (this.Lw > 0.02) for (const w of this.whales) {
+      const fx = Math.sin(w.hd), fz = Math.cos(w.hd), sx = fz, sz = -fx, L = w.len, it = C.WHALE_INT * this.Lw;
+      const body = (s, a, rr) => {                       // s from nose (0) to tail (1), a round the body
+        const R = L * 0.11 * Math.pow(Math.sin(Math.PI * Math.min(0.999, Math.pow(s, 0.75))), 0.9) * rr;
+        const und = Math.sin(w.ph * 1.6 - s * 3) * 0.05 * L * s * s;
+        const along = (0.35 - s) * L, cx = w.x + fx * along, cz = w.z + fz * along, cy = -w.depth + und;
+        return [cx + sx * Math.cos(a) * R, cy + Math.sin(a) * R * 0.8, cz + sz * Math.cos(a) * R];
+      };
+      const col = ice.map((q, k) => q * 0.6 + hot[k] * 0.4), under = 0.85;
+      for (let k = 1; k < 9; k++) { const s2 = k / 9, ring = []; for (let q = 0; q <= 16; q++) ring.push(body(s2, q / 16 * 2 * Math.PI, 1)); poly(ring, col, it * 0.6 * under); }
+      for (let q = 0; q < 8; q++) { const line = []; for (let k = 0; k <= 24; k++) line.push(body(k / 24, q / 8 * 2 * Math.PI, 1)); poly(line, col, it * under); }
+      const tail = body(1, 0, 0), beat = Math.sin(w.ph * 1.6 - 3) * 0.12 * L;   // flukes
+      for (const side of [1, -1]) poly([tail, [tail[0] + sx * side * 0.17 * L - fx * 0.08 * L, tail[1] + beat, tail[2] + sz * side * 0.17 * L - fz * 0.08 * L], [tail[0] + sx * side * 0.05 * L - fx * 0.02 * L, tail[1] + beat * 0.6, tail[2] + sz * side * 0.05 * L - fz * 0.02 * L], tail], col, it);
+      const pec = body(0.3, 0, 1);                   // pectoral fins
+      for (const side of [1, -1]) poly([body(0.3, side > 0 ? 0 : Math.PI, 1), [pec[0] + sx * side * 0.16 * L - fx * 0.07 * L, pec[1] - 0.05 * L, pec[2] + sz * side * 0.16 * L - fz * 0.07 * L], body(0.38, side > 0 ? 0 : Math.PI, 1)], col, it * 0.8);
+    }
+    // spray and snow: dots, with some characters among them
+    for (const p of this.spray) if (p.g < 0) point(p.x, p.y, p.z, ice, 0.6 * (1 - p.age / p.life));
+    if (this.Ls > 0.02) for (const f of this.snow) if (f.g < 0) point(f.x, f.y, f.z, [1, 1, 1], C.SNOW_INT * this.Ls * (0.5 + 2.5 * (f.glint || 0)));
+    const D = r.pDots;
+    gl.bindVertexArray(r.dotVao); gl.bindBuffer(gl.ARRAY_BUFFER, r.dotBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, r.dots.subarray(0, n * 6), gl.STREAM_DRAW);
+    gl.useProgram(D.p); gl.uniform1f(D.u.u_mult, s);
+    gl.uniform2f(D.u.u_center, W / 2, H / 2); gl.uniform2f(D.u.u_rot, 1, 0); gl.uniform1f(D.u.u_zoom, 1); gl.uniform2f(D.u.u_world, W, H);
+    gl.drawArrays(gl.POINTS, 0, n);
+    let m = 0; const I = this.inst;
+    const put = (X, Y, Z, size, g, c, it) => { if ((m + 1) * 11 <= I.length) { I.set([X, Y, Z, 0, 1, size, g, c[0], c[1], c[2], it], m * 11); m++; } };
+    if (this.Ls > 0.02) for (const f of this.snow) if (f.g >= 0) put(f.x, f.y, f.z, 22, f.g, [0.9, 0.95, 1], C.SNOW_INT * 0.9 * this.Ls * (0.5 + 2 * (f.glint || 0)));
+    for (const p of this.spray) if (p.g >= 0) put(p.x, p.y, p.z, 30, p.g, ice, 0.7 * (1 - p.age / p.life));
+    const G = this.G.glyph;
+    gl.bindVertexArray(this.G.vao); gl.bindBuffer(gl.ARRAY_BUFFER, this.G.buf);
+    gl.useProgram(G.p);
+    gl.uniform3f(G.u.u_cam, cam.x, cam.y, cam.z); gl.uniform1f(G.u.u_pitch, cam.pitch); gl.uniform1f(G.u.u_yaw, cam.yaw);
+    gl.uniform1f(G.u.u_f, C.FOCAL); gl.uniform2f(G.u.u_cs, W / 2, H / 2); gl.uniform2f(G.u.u_world, W, H); gl.uniform1f(G.u.u_fog, 0.00014);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.G.tex); gl.uniform1i(G.u.u_atlas, 0);
+    gl.bufferData(gl.ARRAY_BUFFER, I.subarray(0, m * 11), gl.STREAM_DRAW);
+    gl.uniform1f(G.u.u_screen, 0); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, m);
+    gl.bindVertexArray(null); gl.disable(gl.BLEND);
+    this.points = n;
+    r.compose({ F, frame: i, bg: [0, 0, 0], glow: C.GLOW, exposure: C.EXPOSURE, fadeIn: C.FADE_IN, fadeOut: C.FADE_OUT });
+  }
+  stats() { return [["view", AUR_VIEWS[this.view % 4] || "–"], ["cracks", this.cracks.length], ["spray", this.spray.length], ["points", (this.points || 0).toLocaleString()]]; }
+}
+
 // =========================== VISUALISER MENU ===============================
 // Every visualiser shares the analysis, playback, recording and glow pass, and brings its own
 // physics, drawing, settings and "how the music drives it" table.
@@ -3233,6 +3485,25 @@ const VISUALISERS = [
     layers: ["trees", "leaves", "rain", "beings"],
     create: F => new DataForest(F),
   },
+  {
+    id: "aurora-shelf", name: "Aurora Shelf", status: "On trial",
+    blurb: "A polar ice shelf at night: aurora, data snow, cracking ice and whales",
+    config: AUR, sliders: AUR_SLIDERS, particles: false,
+    hints: { sub: "swell", kick: "cracks", snare: "spouts", lowmid: "wind", hat: "glints", centroid: "–", melody: "aurora" },
+    mapping: [
+      ["Story energy", "How hard the blizzard blows, how bright the aurora is, and the camera's pace"],
+      ["Kick", "A crack races across the ice, forking as it goes, glowing and then fading"],
+      ["Sub + bass", "The sea swell rises and the icebergs heave"],
+      ["Melody", "A band of aurora brightens and ripples in the note's colour"],
+      ["Clap", "A whale near the surface blows a spout of data spray"],
+      ["Hats", "Ice crystals glint in the snow"],
+      ["Low mids", "The wind turns, carrying the snow"],
+      ["Story effects", "Ice & cracks, aurora, data snow and whales, chapter by chapter"],
+      ["Story variation", "The view: skimming the ice towards the sea, aerial, a sky gaze from sea level, or circling an iceberg"],
+    ],
+    layers: ["ice", "aurora", "snow", "whales"],
+    create: F => new AuroraShelf(F),
+  },
 ];
 VISUALISERS.forEach(v => { v.defaults = JSON.parse(JSON.stringify(v.config)); });
 
@@ -3332,6 +3603,7 @@ $("partSel").addEventListener("change", e => { CONFIG.N_PARTICLES = +e.target.va
 $("resSel").addEventListener("change", e => { app.scale = +e.target.value; });
 $("resetBtn").addEventListener("click", () => {
   Object.assign(app.vis.config, JSON.parse(JSON.stringify(app.vis.defaults)));
+  applyAspect(app.aspect);                        // keep the current format's sizes
   buildSettings(); if (!app.playing) redrawStill();
 });
 
@@ -3416,7 +3688,8 @@ function renderSectionEditor() {
     chips.appendChild(b);
   }
   $("seVar").value = String(sec.variation);
-  $("seVarNote").textContent = app.vis.id === "data-forest" ? "Changes the view: a walk among the trees, an orbit from outside, a worm's eye view up into the canopy, or above the treetops."
+  $("seVarNote").textContent = app.vis.id === "aurora-shelf" ? "Changes the view: skimming the ice, aerial, a sky gaze from the sea, or circling an iceberg."
+    : app.vis.id === "data-forest" ? "Changes the view: a walk among the trees, an orbit from outside, a worm's eye view up into the canopy, or above the treetops."
     : app.vis.id === "wire-city" ? "Changes the camera: orbit, street level, plan view or rising spiral; and the accent colour."
     : app.vis.id === "signal-plane" ? "Changes the cable layout (lanes, diagonals, meanders, fan), the objects below, and the accent colour."
     : app.vis.id === "deep-voyage" ? "Changes the region: open space, a planetary system, a black hole zone or a nebula; and the palette."
@@ -3443,7 +3716,8 @@ function drawStory() {
                       nebula: "#b48cff", planets: "#7fd1ff", blackholes: "#ffb36b", comets: "#9be37a",
                       streams: "#e8ecff", field: "#8a93b8", wireframes: "#7fd1ff", smoke: "#ff7a9a",
                       city: "#cfd8ff", data: "#7ff0d8", sky: "#b48cff", scans: "#ffd36b",
-                      trees: "#9be37a", leaves: "#ffb36b", rain: "#7ff0d8", beings: "#ff9ec4" };
+                      trees: "#9be37a", leaves: "#ffb36b", rain: "#7ff0d8", beings: "#ff9ec4",
+                      ice: "#cfe8ff", aurora: "#7fffb0", snow: "#ffffff", whales: "#7fd1ff" };
   S.sections.forEach((sec, s) => {
     const x0 = X(sec.start), x1 = X(sec.end);
     if (s === app.selSec) { g.fillStyle = photon; g.globalAlpha = 0.14; g.fillRect(x0, 0, x1 - x0, h); g.globalAlpha = 1; }
@@ -3542,7 +3816,29 @@ async function buildPoster() {
   hideOverlay(); updateMeters(best); setProgress(best / FPS);
 }
 function redrawStill() { if (app.scene && app.scene.frame >= 0 && !app.busy) app.scene.draw(); }
-const sceneKey = () => [app.vis.id, app.scale, app.vis.particles ? CONFIG.N_PARTICLES : 0].join("|");
+const sceneKey = () => [app.vis.id, app.scale, app.aspect, app.vis.particles ? CONFIG.N_PARTICLES : 0].join("|");
+// ----- video format: vertical, square or landscape -----
+const ASPECTS = { vertical: [1080, 1920], square: [1080, 1080], landscape: [1920, 1080] };
+function applyAspect(name) {
+  const [W, H] = ASPECTS[name] || ASPECTS.vertical;
+  app.aspect = ASPECTS[name] ? name : "vertical";
+  CONFIG.W = W; CONFIG.H = H; CONFIG.CENTER = [W * 0.5, H * 0.47];
+  const M = Math.max(W, H);                       // simulation grids keep square cells in every shape
+  INK.SIM_W = Math.round(256 * W / M); INK.SIM_H = Math.round(256 * H / M); INK.DYE_W = Math.round(960 * W / M); INK.DYE_H = Math.round(960 * H / M);
+  RIPPLE.SIM_W = Math.round(480 * W / M); RIPPLE.SIM_H = Math.round(480 * H / M);
+  FLUX.GRID_X = Math.round(W / 40); FLUX.GRID_Y = Math.round(H / 40);
+  document.querySelector(".app").style.setProperty("--ar", String(W / H));
+  $("fmtTag").textContent = `${W} × ${H} · 30 fps`;
+  $("resHalf").textContent = `${W / 2} × ${H / 2} (fast)`; $("resFull").textContent = `${W} × ${H} (full)`;
+  $("fmtSel").value = app.aspect;
+}
+$("fmtSel").addEventListener("change", async e => {
+  if (app.recording || app.busy) { e.target.value = app.aspect; return; }
+  applyAspect(e.target.value);
+  try { localStorage.setItem("visualz-format", app.aspect); } catch (_) {}
+  if (app.F) { stopPlayback(); app.busy = true; setEnabled(false); try { await buildPoster(); } finally { app.busy = false; setEnabled(true); } }
+  drawStory();
+});
 function newScene() {
   if (app.scene) app.scene.dispose();
   app.scene = null; renderer.resize(app.scale);
@@ -3673,7 +3969,7 @@ $("recBtn").addEventListener("click", () => {
     const type = rec.mimeType || mime || "video/webm";
     app.recBlob = new Blob(chunks, { type }); app.recExt = type.includes("mp4") ? "mp4" : "webm";
     app.recording = null; $("recBtn").classList.remove("on"); $("recLabel").textContent = "Record video"; $("recBadge").hidden = true;
-    $("playBtn").disabled = $("restartBtn").disabled = $("demoBtn").disabled = $("file").disabled = false;
+    $("playBtn").disabled = $("restartBtn").disabled = $("demoBtn").disabled = $("file").disabled = $("fmtSel").disabled = false;
     $("saveVidBtn").textContent = `Save video (${app.recExt.toUpperCase()}, ${(app.recBlob.size / 1048576).toFixed(1)} MB)`;
     $("saveOut").hidden = false;
     $("recNote").textContent = app.recExt === "webm"
@@ -3683,7 +3979,7 @@ $("recBtn").addEventListener("click", () => {
   rec.start(1000);
   app.recording = rec;
   $("recBtn").classList.add("on"); $("recLabel").textContent = "Stop recording"; $("recBadge").hidden = false;
-  $("playBtn").disabled = $("restartBtn").disabled = $("demoBtn").disabled = $("file").disabled = true;
+  $("playBtn").disabled = $("restartBtn").disabled = $("demoBtn").disabled = $("file").disabled = $("fmtSel").disabled = true;
 });
 async function offerFile(blob, filename) {
   if (app.downloads) {
@@ -3706,5 +4002,6 @@ $("stillBtn").addEventListener("click", () => {
 });
 
 // open in a working state: analyse the built-in demo track straight away
+{ let f = "vertical"; try { f = localStorage.getItem("visualz-format") || f; } catch (_) {} applyAspect(f); }
 if (renderer) setTimeout(loadDemo, 50);
 </script>
