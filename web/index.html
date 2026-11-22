@@ -3492,25 +3492,32 @@ class SteppeFlight {
     const E = STORY.energy(i), v = STORY.variant(i); this.E = E; this.style = v;
     this.Ls = STORY.layer("steppe", i); this.Ll = STORY.layer("life", i); this.Lb = STORY.layer("birds", i);
     this.Lc = STORY.layer("clouds", i); this.Lw = STORY.layer("wind", i);
-    this.mH += (C.MOUNTAINS * STORY.layer("mountains", i) - this.mH) * (1 - Math.exp(-DT / 3));   // mountains rise slowly
+    this.mH += (C.MOUNTAINS * STORY.layer("mountains", i) - this.mH) * (1 - Math.exp(-DT / 8));   // mountains rise slowly
     const target = PALETTES[C.PALETTE_LOCK >= 0 ? C.PALETTE_LOCK : STORY.palette(i, F)];
     const kp = 1 - Math.exp(-1.2 * DT);
     for (let a = 0; a < 4; a++) for (let c = 0; c < 3; c++) this.pal[a][c] += (target[a][c] - this.pal[a][c]) * kp;
     // flight: speed from energy, low mids bank and turn, styles set the height, bass pulls you down
     const speed = 500 + C.FLY * E * E; this.speed = speed;
-    const turn = 0.12 * Math.sin(this.t * 0.05) + 0.25 * (F.lowmid[i] - 0.4);
-    this.heading += turn * DT; this.heading = clamp(this.heading, -0.45, 0.45);
+    this.lmAvg = (this.lmAvg ?? F.lowmid[i]) + (F.lowmid[i] - (this.lmAvg ?? F.lowmid[i])) * (1 - Math.exp(-DT / 6));
+    const turn = 0.1 * Math.sin(this.t * 0.05) + 0.5 * (F.lowmid[i] - this.lmAvg) - 0.15 * this.heading;   // no lasting bias; drifts back to straight
+    const h0 = this.heading;
+    this.heading = clamp(this.heading + turn * DT, -0.45, 0.45);
+    const rate = (this.heading - h0) / DT;
     cam.x += Math.sin(this.heading) * speed * DT; cam.z += Math.cos(this.heading) * speed * DT;
     const bass = 0.6 * F.sub[i] + 0.4 * F.bass[i];
     const styleAlt = [90, 450, 1900, 700 + 650 * Math.sin(this.t * 0.5)][v % 4] * C.ALTITUDE;
     const want = styleAlt * (1 - C.SWOOP * 0.6 * bass) + (v % 4 === 3 ? C.SWOOP * 500 * Math.sin(this.t * 0.5) : 0);
     this.alt += (want - this.alt) * (1 - Math.exp(-DT / 1.2));
     const fx = Math.sin(this.heading), fz = Math.cos(this.heading);
-    let ground = this.H(cam.x, cam.z);
-    for (const d of [300, 800, 1600]) ground = Math.max(ground, this.H(cam.x + fx * d, cam.z + fz * d) - d * 0.15);   // climb before ridges
+    const here = this.H(cam.x, cam.z);
+    let ground = here;
+    for (const d of [250, 600, 1000, 1600, 2400, 3200, 4000]) {             // look well ahead and climb early to clear peaks
+      for (const sd of [-250, 0, 250]) ground = Math.max(ground, this.H(cam.x + fx * d + fz * sd, cam.z + fz * d - fx * sd) - d * 0.04);
+    }
     const wantY = ground + Math.max(40, this.alt);
-    cam.y += (wantY - cam.y) * (1 - Math.exp(-DT / 0.6));
-    cam.yaw = this.heading; cam.pitch = 0.28 + Math.min(0.4, this.alt / 6000); cam.roll += (-turn * 1.6 - cam.roll) * (1 - Math.exp(-DT / 0.8));
+    cam.y += (wantY - cam.y) * (1 - Math.exp(-DT / (wantY > cam.y ? 0.45 : 1.2)));
+    cam.y = Math.max(cam.y, here + 25);
+    cam.yaw = this.heading; cam.pitch = 0.28 + Math.min(0.4, this.alt / 6000); cam.roll += (-rate * 1.6 - cam.roll) * (1 - Math.exp(-DT / 0.8));   // bank only while actually turning
     // wind: kicks gust through the grass
     this.windAng += 0.2 * (F.lowmid[i] - 0.4) * DT;
     if (F.kickHits.has(i)) this.gust = Math.min(2, this.gust + 0.6 * (0.4 + 0.6 * F.kickHits.get(i)));
@@ -3599,26 +3606,23 @@ class SteppeFlight {
     const grass = [0.72, 0.85, 0.62].map((q, k) => q * 0.7 + cold[k] * 0.3), snow = [0.95, 0.97, 1];
     if (this.Ls > 0.02) {
       const it = C.LAND_INT * this.Ls * (0.6 + 0.4 * E);
-      const along = cam.x * fx + cam.z * fz;                     // snap rows to the ground so they don't swim
-      for (const [d0, d1, step] of [[0, 2500, 110], [2500, 7000, 300], [7000, 18000, 800]]) {
-        for (let d = Math.ceil((along + d0) / step) * step - along; d < d1; d += step) {
-          const half = 400 + d * 1.0, row = [];
-          for (let k = -20; k <= 20; k++) { const [x, z] = world(d, half * k / 20); const h = this.H(x, z); row.push([x, h, z]); }
-          poly(row, grass, it);
+      // the grid is fixed to the land (rows at fixed z, columns at fixed x), so hills and mountains stay solid
+      const sz = Math.sign(fz) || 1, bands = [[-300, 2500, 110], [2500, 7000, 300], [7000, 18000, 800]];
+      for (const [d0, d1, step] of bands) {
+        const za = cam.z + sz * d0, zb = cam.z + sz * d1, zlo = Math.min(za, zb), zhi = Math.max(za, zb);
+        const xr = 600 + d1 * 1.15, x0 = Math.floor((cam.x - xr) / step) * step, x1 = Math.ceil((cam.x + xr) / step) * step;
+        for (let z = Math.ceil(zlo / step) * step; z <= zhi; z += step) {           // rows across
+          const row = []; for (let x = x0; x <= x1; x += step) row.push([x, this.H(x, z), z]); poly(row, grass, it);
+        }
+        const cstep = step * 2;
+        for (let x = Math.ceil(x0 / cstep) * cstep; x <= x1; x += cstep) {         // columns running ahead
+          const col = []; for (let z = Math.floor(zlo / step) * step; z <= zhi + step; z += step) col.push([x, this.H(x, z), z]); poly(col, grass, it * 0.7);
         }
       }
-      const side = cam.x * rxv + cam.z * rzv;
-      for (const [d0, d1, step] of [[0, 3000, 160], [3000, 18000, 700]]) {
-        for (let sd = Math.ceil((side - d1) / step) * step - side; sd < d1; sd += step) {
-          const col = [];
-          for (let d = d0; d <= d1; d += (d1 - d0) / 24) { if (Math.abs(sd) > 400 + d * 1.0) continue; const [x, z] = world(d, sd); col.push([x, this.H(x, z), z]); }
-          if (col.length > 1) poly(col, grass, it * 0.7);
-        }
-      }
-      // mountain detail: ridge lines with snow above the snow line
-      if (this.mH > 0.02) for (let d = 3000; d < 18000; d += 700) {
-        const half = 400 + d, row = [];
-        for (let k = -30; k <= 30; k++) { const [x, z] = world(d, half * k / 30); row.push([x, this.H(x, z), z]); }
+      // mountain ridges: brighter snowy lines on high ground, on the same fixed grid
+      if (this.mH > 0.02) for (let z = Math.ceil((cam.z + sz * 2500) / 400) * 400; Math.abs(z - cam.z) < 18000; z += 400 * sz) {
+        const d = Math.abs(z - cam.z), xr = 600 + d * 1.15, x0 = Math.floor((cam.x - xr) / 200) * 200, row = [];
+        for (let x = x0; x <= cam.x + xr; x += 200) row.push([x, this.H(x, z), z]);
         for (let q = 1; q < row.length; q++) if (row[q][1] > 500 || row[q - 1][1] > 500) poly([row[q - 1], row[q]], snow, it * 2 * Math.min(1, Math.max(row[q][1], row[q - 1][1]) / 1400));
       }
       // grass: a still stipple texture on the land, with soft bands of light rolling across it in the wind
