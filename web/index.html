@@ -146,26 +146,66 @@ table.map td { padding: 6px 0; border-top: 1px solid var(--line); vertical-align
 table.map td:first-child { color: var(--photon); font-family: var(--font-mono); font-size: 0.72rem; width: 34%; padding-right: 10px; }
 .save-out { display: flex; flex-direction: column; gap: 8px; }
 .fmt-row { grid-template-columns: 4.5rem minmax(0, 1fr); }
-/* Desktop: the stage takes the window height, the controls spread across two columns beside it,
-   so the whole app fits on one screen without scrolling. */
+/* Layout: a big stage, and one narrow column of controls on the right (sliders first).
+   The story panel opens between them and the stage gives up width for it. */
+.rack { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.rack .panel { padding: 10px 12px; gap: 8px; border-radius: 12px; }
+.rack-head { display: flex; gap: 8px; align-items: flex-end; min-width: 0; }
+.vis-pick { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; font-size: 0.7rem; color: var(--muted); }
+.vis-pick select { font-weight: 700; font-size: 0.82rem; color: var(--text); }
+.tabs { display: flex; flex-direction: row; gap: 4px; flex: none; }
+.tabs button { min-height: 34px; padding: 4px 10px; font-size: 0.78rem; border-radius: 8px; }
+.tabs button[aria-selected="true"] { background: var(--photon); color: var(--photon-ink); border-color: var(--photon); }
+#sliders { display: flex; flex-direction: column; gap: 3px; }
+.ctl { grid-template-columns: 6.6rem minmax(0, 1fr) 2.9rem; gap: 8px; }
+.ctl label { font-size: 0.8rem; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.grid2 label { display: flex; flex-direction: column; gap: 3px; font-size: 0.7rem; color: var(--muted); min-width: 0; }
+.rack select { min-height: 32px; padding: 4px 6px; font-size: 0.78rem; }
+button.quiet { min-height: 32px; padding: 4px 10px; font-size: 0.76rem; align-self: end; }
+.row.tight { gap: 6px; }
+.row.tight button, .row.tight .btn { min-height: 36px; padding: 6px 10px; font-size: 0.8rem; }
+.file-name { font-size: 0.72rem; }
+.meters { gap: 4px; }
+.meter .well { height: 26px; border-radius: 4px; }
+.meter small { display: none; }
+.meter span { font-size: 0.52rem; }
+.chroma { gap: 3px; }
+.chroma i { width: min(100%, 13px); }
+.chroma-labels { font-size: 0.5rem; gap: 3px; }
+.note:empty { display: none; }
+.panel h2 { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.help {
+  position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line); color: var(--muted);
+  font: 600 0.68rem var(--font-mono); letter-spacing: 0; text-transform: none; cursor: help;
+}
+.rack-head > .help { margin-bottom: 8px; }
+.help:hover, .help:focus { color: var(--text); border-color: var(--muted); outline: none; }
+.help:focus-visible { outline: 2px solid var(--photon); outline-offset: 2px; }
+.help .tip {
+  display: none; position: absolute; top: calc(100% + 6px); right: -8px; width: 280px; z-index: 30;
+  background: var(--rack-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+  font: 400 0.78rem/1.45 var(--font-body); color: var(--text); text-align: left; letter-spacing: 0; text-transform: none;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+}
+.story-panel .help .tip { left: -8px; right: auto; }
+.help .tip.tip-wide { width: 330px; }
+.help .tip b { font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.help:hover .tip, .help:focus .tip, .help:focus-within .tip { display: block; }
+.help .tip table.map { margin-top: 6px; font-size: 0.74rem; }
 @media (min-width: 1000px) {
-  body { padding-block: 12px; }
-  .app { grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 18px;
-         --stage-w: max(300px, min(calc((100vh - 118px) * var(--ar)), 44vw)); }
-  .stage-col { gap: 8px; }
-  .rack { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
-  .rack-col { gap: 12px; }
-  .panel { padding: 12px 14px; gap: 9px; }
-  .meter .well { height: 40px; }
-  #sliders { gap: 6px !important; }
-  button, .btn { min-height: 38px; padding: 8px 12px; }
-  select { min-height: 34px; padding: 6px 8px; }
-  .transport button.round { width: 42px; height: 42px; }
-}/* Narrow desktops: label above a full-width slider so the sliders stay usable. */
-@media (min-width: 1000px) and (max-width: 1239px) {
-  .ctl { grid-template-columns: minmax(0, 1fr) 3rem; row-gap: 2px; }
-  .ctl input[type=range] { grid-column: 1 / -1; order: 3; }
-  #sliders { gap: 4px !important; }
+  body { padding-block: 10px; }
+  .app { max-width: none; gap: 16px; align-items: start; grid-template-columns: minmax(0, 1fr) 340px;
+         --stage-w: max(280px, min(calc((100vh - 104px) * var(--ar)), calc(100vw - 340px - 52px))); }
+  .app.story-mode { grid-template-columns: auto minmax(380px, 1fr) 340px;
+         --stage-w: max(240px, min(calc((100vh - 104px) * var(--ar)), calc(100vw - 340px - 380px - 72px))); }
+  .app.story-mode .story-panel { grid-column: auto; }
+  .stage-col { gap: 6px; }
+  h1 { font-size: 1.1rem; }
+  .rack { position: sticky; top: 10px; max-height: calc(100vh - 20px); overflow-y: auto; padding-right: 2px; }
+  .story-panel { position: sticky; top: 10px; max-height: calc(100vh - 20px); overflow-y: auto; }
+  .transport button.round { width: 40px; height: 40px; }
 }
 </style>
 
@@ -198,21 +238,12 @@ table.map td:first-child { color: var(--photon); font-family: var(--font-mono); 
     </div>
   </div>
 
-  <div class="rack">
-   <div class="rack-head">
-    <nav class="vis-menu" id="visMenu" aria-label="Choose a visualiser"></nav>
-    <div class="tabs" role="tablist" aria-label="Panels">
-      <button role="tab" id="tabControls" aria-selected="true">Controls</button>
-      <button role="tab" id="tabStory" aria-selected="false">Story</button>
-    </div>
-   </div>
-   <section class="panel story-panel" id="storyPanel" hidden aria-labelledby="h-story">
+  <section class="panel story-panel" id="storyPanel" hidden aria-labelledby="h-story">
     <div class="story-top">
-      <h2 id="h-story">Story</h2>
+      <h2 id="h-story">Story <span class="help" tabindex="0" role="button" aria-label="About the story">?<span class="tip">The line is the energy over the song: it brightens every visualiser and sets how busy the effects get. Sections that sound alike share a letter (A1, A2…), and repeats get a new variation. Click a section to edit it; edits are saved in this browser for this track.</span></span></h2>
       <label class="check" for="storyOn"><input type="checkbox" id="storyOn" checked> Use the story arc</label>
       <button id="storyAuto">Rebuild from track</button>
     </div>
-    <p class="note">The line is the energy over the song: it brightens every visualiser and sets how busy #4 gets. Sections that sound alike share a letter, and repeats get a new variation. Click a section to edit it.</p>
     <canvas id="storyCanvas" aria-label="Story timeline: sections, energy line and effects"></canvas>
     <div class="story-edit" id="storyEdit">
       <div class="se-head"><b id="seTitle">Section</b><span class="note" id="seWhen"></span></div>
@@ -222,75 +253,68 @@ table.map td:first-child { color: var(--photon); font-family: var(--font-mono); 
       <div class="se-row"><label class="se-label" for="seVar">Variation</label><select id="seVar"><option value="0">1</option><option value="1">2</option><option value="2">3</option><option value="3">4</option></select>
         <span class="note" id="seVarNote"></span></div>
     </div>
-   </section>
-   <div class="rack-col">
-    <section class="panel" aria-labelledby="h-track">
-      <h2 id="h-track">Track</h2>
-      <div class="row">
-        <label class="btn" for="file"><svg class="i" viewBox="0 0 24 24"><path d="M12 3v10.6A4 4 0 1 0 14 17V7h4V3h-6z"/></svg>Load MP3 or WAV</label>
-        <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg">
-        <button id="demoBtn">Demo track</button>
-      </div>
-      <div class="file-name" id="fileName">Demo: Mix.mp3</div>
-      <div class="stats" id="hits"></div>
-    </section>
+  </section>
 
-    <section class="panel" aria-labelledby="h-export">
-      <h2 id="h-export">Export</h2>
-      <div class="row">
-        <button class="rec" id="recBtn" disabled><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></svg><span id="recLabel">Record video</span></button>
-        <button id="stillBtn" disabled><svg class="i" viewBox="0 0 24 24"><path d="M4 5h3l2-2h6l2 2h3v14H4zm8 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10z"/></svg>Save still</button>
+  <aside class="rack" aria-label="Controls">
+    <div class="rack-head">
+      <label class="vis-pick" for="visSel"><span>Visualiser</span><select id="visSel"></select></label>
+      <span class="help" tabindex="0" role="button" aria-label="How the music drives this visualiser">?<span class="tip tip-wide"><b>How the music drives it</b><table class="map" id="mapTable"></table></span></span>
+      <div class="tabs" role="tablist" aria-label="Panels">
+        <button role="tab" id="tabControls" aria-selected="true">Controls</button>
+        <button role="tab" id="tabStory" aria-selected="false">Story</button>
       </div>
-      <div class="ctl fmt-row"><label for="fmtSel">Format</label><select id="fmtSel">
-        <option value="vertical">Vertical 9:16 · Reels, TikTok, Shorts</option>
-        <option value="square">Square 1:1 · feed posts</option>
-        <option value="landscape">Landscape 16:9 · YouTube</option>
-      </select></div>
-      <div class="save-out" id="saveOut" hidden>
-        <button class="primary" id="saveVidBtn">Save video</button>
-      </div>
-      <p class="note" id="recNote">Recording plays the whole track once, in real time, with sound. Keep this tab in front while it runs.</p>
-    </section>
+    </div>
 
-    <section class="panel" aria-labelledby="h-hear">
-      <h2 id="h-hear">What it hears, right now</h2>
-      <div class="meters" id="meters"></div>
-      <div class="chroma" id="chroma"></div>
-      <div class="chroma-labels" id="chromaLabels"></div>
-    </section>
-   </div>
-
-   <div class="rack-col">
     <section class="panel" aria-labelledby="h-set">
-      <h2 id="h-set">Settings</h2>
-      <div id="sliders" style="display:flex;flex-direction:column;gap:10px"></div>
-      <div class="pair">
+      <h2 id="h-set">Settings <span class="help" tabindex="0" role="button" aria-label="About the settings">?<span class="tip"><span id="applyNote">Particle count and render size apply on the next play or record.</span> Sliders change the picture straight away, even while it plays.</span></span></h2>
+      <div id="sliders"></div>
+      <div class="grid2">
         <label for="palSel">Palette<select id="palSel"></select></label>
+        <label for="fmtSel">Format<select id="fmtSel">
+          <option value="vertical">Vertical 9:16</option>
+          <option value="square">Square 1:1</option>
+          <option value="landscape">Landscape 16:9</option>
+        </select></label>
+        <label for="resSel">Render size<select id="resSel">
+          <option value="0.5" id="resHalf">540 × 960 (fast)</option>
+          <option value="1" id="resFull">1080 × 1920 (full)</option>
+        </select></label>
         <label for="partSel" id="partWrap">Particles<select id="partSel">
           <option value="12000">12,000 (light)</option>
           <option value="24000">24,000</option>
           <option value="34000" selected>34,000 (as Python)</option>
         </select></label>
+        <button id="resetBtn" class="quiet">Reset settings</button>
       </div>
-      <div class="pair" style="align-items:end">
-        <label for="resSel">Render size<select id="resSel">
-          <option value="0.5" id="resHalf">540 × 960 (fast)</option>
-          <option value="1" id="resFull">1080 × 1920 (full)</option>
-        </select></label>
-        <button id="resetBtn">Reset settings</button>
-      </div>
-      <p class="note" id="applyNote">Particle count and render size apply on the next play or record.</p>
     </section>
 
-    <section class="panel">
-      <details>
-        <summary>How the music drives it</summary>
-        <table class="map" id="mapTable"></table>
-      </details>
+    <section class="panel" aria-labelledby="h-track">
+      <h2 id="h-track">Track &amp; export <span class="help" tabindex="0" role="button" aria-label="About track and export">?<span class="tip">Load an MP3 or WAV, or use the demo track. Vertical 9:16 suits Reels, TikTok and Shorts; Square 1:1 suits feed posts; Landscape 16:9 suits YouTube. Recording plays the whole track once, in real time, with sound, so keep this tab in front while it runs.</span></span></h2>
+      <div class="row tight">
+        <label class="btn" for="file"><svg class="i" viewBox="0 0 24 24"><path d="M12 3v10.6A4 4 0 1 0 14 17V7h4V3h-6z"/></svg>Load MP3 / WAV</label>
+        <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg">
+        <button id="demoBtn">Demo track</button>
+      </div>
+      <div class="file-name" id="fileName">Demo: Mix.mp3</div>
+      <div class="stats" id="hits"></div>
+      <div class="row tight">
+        <button class="rec" id="recBtn" disabled><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></svg><span id="recLabel">Record video</span></button>
+        <button id="stillBtn" disabled><svg class="i" viewBox="0 0 24 24"><path d="M4 5h3l2-2h6l2 2h3v14H4zm8 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10z"/></svg>Save still</button>
+      </div>
+      <div class="save-out" id="saveOut" hidden>
+        <button class="primary" id="saveVidBtn">Save video</button>
+      </div>
+      <p class="note" id="recNote"></p>
+    </section>
+
+    <section class="panel" aria-labelledby="h-hear">
+      <h2 id="h-hear">What it hears <span class="help" tabindex="0" role="button" aria-label="About the meters">?<span class="tip">Live levels for each part of the music, and the twelve notes coloured round the circle of fifths. Hover a meter to see what it drives in this visualiser.</span></span></h2>
+      <div class="meters" id="meters"></div>
+      <div class="chroma" id="chroma"></div>
+      <div class="chroma-labels" id="chromaLabels"></div>
       <div class="stats" id="perf"></div>
     </section>
-   </div>
-  </div>
+  </aside>
 </div>
 
 <script>
@@ -3670,7 +3694,7 @@ function buildSettings() {
   $("partSel").value = String(CONFIG.N_PARTICLES);
   const tb = $("mapTable"); tb.textContent = "";
   for (const [a, b] of V.mapping) { const tr = tb.insertRow(); tr.insertCell().textContent = a; tr.insertCell().textContent = b; }
-  if (typeof meterHints !== "undefined") METERS.forEach(([k], j) => { meterHints[j].textContent = V.hints[k] || ""; });
+  if (typeof meterHints !== "undefined") METERS.forEach(([k, label], j) => { const h = V.hints[k] || ""; meterHints[j].textContent = h; meterHints[j].parentElement.title = label + (h && h !== "–" ? " → " + h : ""); });
 }
 $("palSel").addEventListener("change", e => { app.vis.config.PALETTE_LOCK = +e.target.value; });
 $("partSel").addEventListener("change", e => { CONFIG.N_PARTICLES = +e.target.value; });
@@ -3683,19 +3707,16 @@ $("resetBtn").addEventListener("click", () => {
 
 // ----- visualiser menu -----
 function buildMenu() {
-  const nav = $("visMenu"); nav.textContent = "";
+  const sel = $("visSel"); sel.textContent = "";
   VISUALISERS.forEach((v, k) => {
-    const b = document.createElement("button"); b.className = "vis-card"; b.dataset.id = v.id;
-    b.innerHTML = `<span class="num"></span><span class="nm"></span><span class="st"></span><span class="bl"></span>`;
-    b.querySelector(".num").textContent = "#" + (k + 1); b.querySelector(".nm").textContent = v.name;
-    const st = b.querySelector(".st"); st.textContent = v.status; st.classList.toggle("kept", v.status === "Kept");
-    b.querySelector(".bl").textContent = v.blurb; b.title = v.blurb;
-    b.addEventListener("click", () => selectVis(v.id));
-    nav.appendChild(b);
+    const o = document.createElement("option"); o.value = v.id;
+    o.textContent = `#${k + 1} ${v.name}` + (v.status === "Kept" ? " (kept)" : ""); o.title = v.blurb;
+    sel.appendChild(o);
   });
 }
+$("visSel").addEventListener("change", e => selectVis(e.target.value));
 function markMenu() {
-  for (const b of $("visMenu").children) b.setAttribute("aria-pressed", String(b.dataset.id === app.vis.id));
+  $("visSel").value = app.vis.id; $("visSel").title = app.vis.blurb;
   $("visName").textContent = app.vis.name;
 }
 async function selectVis(id) {
@@ -3729,7 +3750,7 @@ function storyChanged(redrawEditor) {
 const themeName = sec => String.fromCharCode(65 + (sec.theme % 26)) + (sec.occ || sec.variation + 1);   // e.g. A3 = third time A plays
 function setTab(story) {
   $("storyPanel").hidden = !story;
-  document.querySelectorAll(".rack-col").forEach(c => { c.hidden = story; });
+  document.querySelector(".app").classList.toggle("story-mode", story);
   $("tabStory").setAttribute("aria-selected", String(story)); $("tabControls").setAttribute("aria-selected", String(!story));
   if (story) { renderSectionEditor(); drawStory(); }
 }
@@ -3863,8 +3884,8 @@ async function loadBuffer(buf, name) {
   const F = app.F, took = ((performance.now() - t0) / 1000).toFixed(1);
   $("hits").innerHTML = "";
   const stat = (k, v) => { const s = document.createElement("span"); s.innerHTML = `${k} <b></b>`; s.querySelector("b").textContent = v; $("hits").appendChild(s); };
-  stat("length", fmtTime(F.duration)); stat("kicks", F.kickHits.size); stat("snares", F.snareHits.size);
-  stat("hats", F.hatHits.size); stat("sections", F.secEnergy.length); stat("analysed in", took + " s");
+  stat("kicks", F.kickHits.size); stat("snares", F.snareHits.size); stat("hats", F.hatHits.size); stat("sections", F.secEnergy.length);
+  $("hits").title = "Analysed in " + took + " s";
   $("tDur").textContent = fmtTime(F.duration);
   const tr = $("trackBar"); tr.querySelectorAll(".sec").forEach(e => e.remove());
   for (const st of F.sectionTimes.slice(1)) { const m = document.createElement("div"); m.className = "sec"; m.style.left = (st / F.duration * 100) + "%"; tr.appendChild(m); }
