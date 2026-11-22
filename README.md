@@ -21,6 +21,16 @@ A link ending in `#ink-tide` (or any visualiser id) opens that visualiser direct
 | 1 | Gravity Harp (`gravity-harp`) | Kept | Particles under gravity + viscosity, 1-D wave-equation strings, shockwaves |
 | 2 | Ink Tide (`ink-tide`) | Kept | 2-D incompressible Navier–Stokes (stable fluids on the GPU); every force is a vortex pair |
 | 3 | Ripple Tank (`ripple-tank`) | On trial | 2-D damped wave equation; 12 note sources at pitch-scaled frequencies interfere, a refracting lens focuses caustics |
+| 4 | Flux Lattice (`flux-lattice`) | On trial | Wave equation on a flexible 2-D grid; melody packets fly ballistically, bounce off the frame and roll on the grid's slope; cymbal lasers reflect round the frame |
+
+### Story
+
+The **Story** tab (next to the visualiser menu) holds the song's arc: chapters (analysis sections,
+long ones split into ~20 s pieces snapped to kicks), each with an energy level, a shape (Hold,
+Build, Fade out, Follow music), which effects are on, and a variation. Sections that sound alike
+share a letter (A1, A2…). The default story builds up to the drop (the first full-energy chapter
+after a breakdown), adding one effect at a time, then follows the music. The energy line brightens
+every visualiser; #4 also uses the effects and variations. Edits are saved in the browser per track.
 
 To remove a visualiser, delete its entry from `VISUALISERS` and its class/config block.
 

@@ -30,7 +30,26 @@ body {
   padding-block: 16px 32px;
 }
 .app { display: grid; gap: 20px; max-width: 1560px; margin: 0 auto; grid-template-columns: minmax(0, 1fr); --stage-w: min(100%, calc(82vh * 9 / 16)); }
-.vis-menu { display: flex; gap: 8px; overflow-x: auto; grid-column: 1 / -1; min-width: 0; padding-bottom: 2px; }
+.rack-head { grid-column: 1 / -1; display: flex; gap: 8px; min-width: 0; align-items: stretch; }
+.vis-menu { display: flex; gap: 8px; overflow-x: auto; flex: 1; min-width: 0; padding-bottom: 2px; }
+.tabs { display: flex; flex-direction: column; gap: 4px; flex: none; }
+.tabs button { min-height: 0; flex: 1; padding: 4px 12px; font-size: 0.78rem; border-radius: 8px; }
+.tabs button[aria-selected="true"] { background: var(--photon); color: var(--photon-ink); border-color: var(--photon); }
+.story-panel { grid-column: 1 / -1; }
+.story-top { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.story-top h2 { margin-right: auto; }
+.check { display: inline-flex; gap: 6px; align-items: center; font-size: 0.82rem; cursor: pointer; }
+.check input { accent-color: var(--photon); width: 16px; height: 16px; }
+#storyCanvas { width: 100%; height: 210px; display: block; border-radius: 10px; background: var(--rack-2); cursor: pointer; }
+.story-edit { display: flex; flex-direction: column; gap: 10px; }
+.se-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.se-head b { font-family: var(--font-display); font-weight: 500; font-size: 0.9rem; }
+.se-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.se-label { width: 7.5rem; font-size: 0.82rem; flex: none; }
+.seg, .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.seg button, .chips button { min-height: 32px; padding: 4px 10px; font-size: 0.78rem; border-radius: 99px; }
+.seg button[aria-pressed="true"], .chips button[aria-pressed="true"] { background: var(--photon); color: var(--photon-ink); border-color: var(--photon); }
+#seVar { width: auto; }
 .vis-card {
   flex: 1 0 180px; max-width: 340px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 1px 10px;
   align-items: center; text-align: left; padding: 8px 12px; min-height: 0; border-radius: 12px; background: var(--rack);
@@ -179,7 +198,30 @@ table.map td:first-child { color: var(--photon); font-family: var(--font-mono); 
   </div>
 
   <div class="rack">
-   <nav class="vis-menu" id="visMenu" aria-label="Choose a visualiser"></nav>
+   <div class="rack-head">
+    <nav class="vis-menu" id="visMenu" aria-label="Choose a visualiser"></nav>
+    <div class="tabs" role="tablist" aria-label="Panels">
+      <button role="tab" id="tabControls" aria-selected="true">Controls</button>
+      <button role="tab" id="tabStory" aria-selected="false">Story</button>
+    </div>
+   </div>
+   <section class="panel story-panel" id="storyPanel" hidden aria-labelledby="h-story">
+    <div class="story-top">
+      <h2 id="h-story">Story</h2>
+      <label class="check" for="storyOn"><input type="checkbox" id="storyOn" checked> Use the story arc</label>
+      <button id="storyAuto">Rebuild from track</button>
+    </div>
+    <p class="note">The line is the energy over the song: it brightens every visualiser and sets how busy #4 gets. Sections that sound alike share a letter, and repeats get a new variation. Click a section to edit it.</p>
+    <canvas id="storyCanvas" aria-label="Story timeline: sections, energy line and effects"></canvas>
+    <div class="story-edit" id="storyEdit">
+      <div class="se-head"><b id="seTitle">Section</b><span class="note" id="seWhen"></span></div>
+      <div class="ctl"><label for="seLevel">Energy</label><input type="range" id="seLevel" min="0" max="1" step="0.01"><output id="seLevelOut" for="seLevel"></output></div>
+      <div class="se-row"><span class="se-label">Shape</span><div class="seg" id="seShape" role="group" aria-label="Shape"></div></div>
+      <div class="se-row"><span class="se-label">Effects</span><div class="chips" id="seLayers"></div></div>
+      <div class="se-row"><label class="se-label" for="seVar">Variation</label><select id="seVar"><option value="0">1</option><option value="1">2</option><option value="2">3</option><option value="3">4</option></select>
+        <span class="note" id="seVarNote"></span></div>
+    </div>
+   </section>
    <div class="rack-col">
     <section class="panel" aria-labelledby="h-track">
       <h2 id="h-track">Track</h2>
@@ -534,6 +576,7 @@ async function analyse(audioBuffer, onProgress) {
     segs.splice(best + 1, 1);
   }
   F.sectionTimes = segs.map(s => s.start * bh * HOP / SR);
+  F.sectionVecs = segs.map(s => s.mean.slice());
   F.section = new Int32Array(nframes);
   for (let i = 0, s = 0; i < nframes; i++) {
     while (s + 1 < segs.length && i / FPS >= F.sectionTimes[s + 1]) s++;
@@ -1000,7 +1043,8 @@ class Renderer {
       gl.uniform2f(u.u_world, C.W, C.H); gl.uniform2f(u.u_center, C.CENTER[0], C.CENTER[1]);
       gl.uniform3fv(u.u_bg, o.bg);
       gl.uniform1f(u.u_lift, 0.5 + 1.2 * F.energySlow[i] + 0.6 * F.bass[i]);
-      gl.uniform1f(u.u_glow, o.glow); gl.uniform1f(u.u_exposure, o.exposure); gl.uniform1f(u.u_fade, fade);
+      const arc = STORY.gain(i);    // the story's energy line brightens or dims every visualiser
+      gl.uniform1f(u.u_glow, o.glow * arc); gl.uniform1f(u.u_exposure, o.exposure * arc); gl.uniform1f(u.u_fade, fade);
       gl.uniform1f(u.u_seed, (i % 8) + 1); gl.uniform2f(u.u_res, this.canvas.width, this.canvas.height);
     });
   }
@@ -1440,6 +1484,324 @@ class RippleTank {
   stats() { return [["water grid", RIPPLE.SIM_W + "×" + RIPPLE.SIM_H], ["substeps", RIPPLE.SUBSTEPS]]; }
 }
 
+// =========================== STORY =========================================
+// The story is the song's arc: one entry per section with an energy level, a shape, which effects
+// are on, and a variation number. A default is built from the analysis (build up to the drop, then
+// follow the music; sections that sound alike share a letter and repeats get a new variation),
+// and the Story tab edits it. Every visualiser reads it through STORY below.
+const LAYER_NAMES = { grid: "Grid", kicks: "Kick waves", packets: "Melody packets", lasers: "Cymbal lasers" };
+const SHAPES = { hold: "Hold", build: "Build", fade: "Fade out", follow: "Follow music" };
+const STORY_SIMILAR = 0.75;       // how alike two sections must sound to share a letter (lower = stricter)
+
+// Story chapters: the analysis sections, with long ones split into ~20 s chapters snapped to kicks,
+// so the arc has steps to climb and each repeat of a long groove can look a little different.
+function storyChapters(F) {
+  const kicks = [...F.kickHits.keys()].map(k => k / FPS), out = [], n = F.secEnergy.length;
+  const snap = t => { let best = t, bd = 1.0; for (const k of kicks) { const d = Math.abs(k - t); if (d < bd) { bd = d; best = k; } } return best; };
+  for (let s = 0; s < n; s++) {
+    const start = F.sectionTimes[s], end = s + 1 < n ? F.sectionTimes[s + 1] : F.duration, len = end - start;
+    if (len < 0.5) continue;
+    const parts = len > 30 ? Math.round(len / 20) : 1;
+    let a = start;
+    for (let q = 0; q < parts; q++) { const b = q === parts - 1 ? end : snap(start + len * (q + 1) / parts); out.push({ start: a, end: b, src: s }); a = b; }
+  }
+  return out;
+}
+
+function autoStory(F) {
+  const n = F.secEnergy.length, themes = [], theme = [];
+  const dist = (a, b) => Math.sqrt(a.reduce((s, v, d) => s + (v - b[d]) ** 2, 0) / a.length);
+  for (let s = 0; s < n; s++) {
+    let t = themes.findIndex(v => dist(v, F.sectionVecs[s]) < STORY_SIMILAR);
+    if (t < 0) { themes.push(F.sectionVecs[s]); t = themes.length - 1; }
+    theme.push(t);
+  }
+  const ch = storyChapters(F);
+  const loud = ch.map(c => { let sum = 0, k = 0; for (let i = Math.round(c.start * FPS); i < Math.min(F.nframes, Math.round(c.end * FPS)); i++) { sum += F.energySlow[i]; k++; } return k ? sum / k : 0; });
+  const maxL = Math.max(1e-6, ...loud), rel = loud.map(v => v / maxL);
+  // the drop: the first full-energy chapter after a breakdown; failing that, the first full one a quarter in
+  let drop = -1;
+  for (let c = 1; c < ch.length && drop < 0; c++) if (rel[c] >= 0.9 && rel.slice(0, c).some(v => v < 0.6) && ch[c].start < 0.75 * F.duration) drop = c;
+  for (let c = 1; c < ch.length && drop < 0; c++) if (rel[c] >= 0.85 && ch[c].start >= 0.25 * F.duration) drop = c;
+  if (drop < 0) drop = 0;
+  const pre = ch.slice(0, drop).filter((_, c) => rel[c] >= 0.6).length;
+  const seen = {}, sections = [];
+  let step = 0;
+  ch.forEach((c, k) => {
+    const th = theme[c.src], low = rel[k] < 0.6;
+    let level, shape, L;
+    if (k < drop) {
+      if (low) { level = 0.2; shape = "hold"; L = { grid: true, packets: true, kicks: false, lasers: false }; }
+      else {     // hold the visual back and add one effect at a time
+        step++; level = 0.3 + 0.45 * step / Math.max(1, pre); shape = "build";
+        L = { grid: true, packets: true, kicks: step >= 2 || pre < 2, lasers: step >= 3 || (pre < 3 && step === pre) };
+      }
+    } else if (k === drop) { level = 1; shape = "follow"; L = { grid: true, packets: true, kicks: true, lasers: true }; }
+    else {
+      level = low ? 0.3 : clamp(0.4 + 0.6 * rel[k], 0.4, 1); shape = k === ch.length - 1 && ch.length > 2 ? "fade" : "follow";
+      L = { grid: true, packets: true, kicks: true, lasers: !low };
+    }
+    seen[th] = (seen[th] ?? -1) + 1;
+    sections.push({ start: c.start, end: c.end, theme: th, occ: seen[th] + 1, level: +level.toFixed(2), shape, variation: seen[th] % 4, layers: L });
+  });
+  return { auto: true, drop, sig: n + ":" + Math.round(F.duration), sections };
+}
+
+function evalStory(S, F) {
+  const n = F.nframes, raw = new Float32Array(n), energy = new Float32Array(n);
+  const variant = new Uint8Array(n), theme = new Uint8Array(n), layers = {};
+  for (const k of Object.keys(LAYER_NAMES)) layers[k] = new Float32Array(n);
+  let prev = 0.15;
+  for (const sec of S.sections) {
+    const f0 = clamp(Math.round(sec.start * FPS), 0, n), f1 = clamp(Math.round(sec.end * FPS), 0, n);
+    for (let i = f0; i < f1; i++) {
+      const u = (i - f0) / Math.max(1, f1 - f0);
+      let e = sec.level;
+      if (sec.shape === "build") e = prev + (sec.level - prev) * Math.pow(u, 1.5);   // accelerating rise
+      else if (sec.shape === "fade") e = sec.level * (1 - u) + 0.08 * u;
+      else if (sec.shape === "follow") e = sec.level * (0.6 + 0.4 * F.energySlow[i]);
+      raw[i] = e; variant[i] = sec.variation; theme[i] = sec.theme;
+      for (const k in layers) layers[k][i] = sec.layers[k] ? 1 : 0;
+    }
+    const last = Math.max(0, f1 - 1);
+    prev = sec.shape === "fade" ? 0.08 : sec.shape === "follow" ? sec.level * (0.6 + 0.4 * F.energySlow[last]) : sec.level;
+  }
+  // smooth the jumps between sections (~0.5 s) and fade effects in and out (~1.2 s)
+  const ke = 1 - Math.exp(-DT / 0.5), kl = 1 - Math.exp(-DT / 1.2);
+  let v = raw[0];
+  for (let i = 0; i < n; i++) { v += (raw[i] - v) * ke; energy[i] = v; }
+  for (const k in layers) { const L = layers[k]; let w = L[0]; for (let i = 0; i < n; i++) { w += (L[i] - w) * kl; L[i] = w; } }
+  return { energy, layers, variant, theme };
+}
+
+const STORY = {
+  on: () => app.storyOn && !!app.storyEval,
+  energy: i => STORY.on() ? app.storyEval.energy[i] : 1,
+  layer: (k, i) => STORY.on() ? app.storyEval.layers[k][i] : 1,
+  variant: i => STORY.on() ? app.storyEval.variant[i] : 0,
+  palette: (i, F) => STORY.on() ? (app.storyEval.theme[i] * 3 + app.storyEval.variant[i]) % PALETTES.length : F.section[i] % PALETTES.length,
+  gain: i => STORY.on() ? 0.5 + 0.5 * app.storyEval.energy[i] : 1,     // brightness arc for every visualiser
+};
+
+// =========================== VISUALISER 4: FLUX LATTICE ====================
+// A flexible 2-D grid (wave equation on a 27 x 48 mesh, edges pinned). Kicks send waves through it
+// from a point; the bass makes it sag. Rising notes release packets of energy that fly in straight
+// lines, bounce off the frame and roll along the flexing grid. Cymbals fire laser beams from fixed
+// points that bounce round the frame. The story sets the energy, which effects are on, and the
+// variation (where kicks land, where lasers fire from, the palette).
+const FLUX = {
+  SEED: 21,
+  GRID_X: 27, GRID_Y: 48,           // grid cells (40 px squares)
+  WAVE_SPEED: 260,                  // px/s that kick waves travel across the grid
+  GRID_DAMP: 1.6,                   // 1/s: how fast the grid settles
+  KICK_PULSE: 110,                  // strength of each kick wave
+  BASS_SAG: 25,                     // sub + bass: how far (px) the grid sags under the last kick
+  FLEX: 30,                         // how far grid lines bend sideways per unit slope (visual)
+  GRID_INT: 0.4,
+  PACKET_RATE: 0.6, PACKET_SPEED: 320, PACKET_LIFE: 5, PACKET_PULL: 2500, MAX_PACKETS: 50,
+  LASER_SPEED: 5200, LASER_TAIL: 700, LASER_LIFE: 0.5, LASER_BOUNCES: 5, LASER_INT: 2.2,
+  TRAIL: 0.78, GLOW: 1.0, EXPOSURE: 1.5, FADE_IN: 1.5, FADE_OUT: 3.0,
+  PALETTE_LOCK: -1,
+};
+const FLUX_SLIDERS = [
+  ["GLOW", "Glow", 0, 2.5, 0.05],
+  ["EXPOSURE", "Exposure", 0.6, 3, 0.05],
+  ["TRAIL", "Trails", 0.5, 0.95, 0.01],
+  ["KICK_PULSE", "Kick waves", 0, 500, 10],
+  ["FLEX", "Grid flex", 0, 80, 1],
+  ["PACKET_RATE", "Packets", 0, 3, 0.05],
+  ["PACKET_PULL", "Packet pull", 0, 8000, 100],
+  ["LASER_INT", "Lasers", 0, 3, 0.05],
+];
+
+class FluxLattice {
+  constructor(F) {
+    const C = FLUX;
+    this.F = F; this.frame = -1; this.rng = makeRng(C.SEED);
+    this.nx = C.GRID_X + 1; this.ny = C.GRID_Y + 1; this.h = CONFIG.W / C.GRID_X;
+    this.z = new Float64Array(this.nx * this.ny); this.zv = new Float64Array(this.nx * this.ny);
+    this.packets = []; this.lasers = []; this.kickCount = 0; this.laserPtr = 0; this.lastKick = CONFIG.CENTER.slice();
+    this.prevChroma = new Float64Array(12); this.tmp = [0, 0, 0];
+    this.pal = PALETTES[0].map(c => c.slice()); this.E = 1; this.Lg = 1;
+  }
+  dispose() {}
+
+  sample(x, y, out) {                // bilinear height and slope of the grid at (x, y) px
+    const h = this.h, nx = this.nx, z = this.z;
+    const gx = clamp(x / h, 0, nx - 1.001), gy = clamp(y / h, 0, this.ny - 1.001);
+    const i0 = gx | 0, j0 = gy | 0, fx = gx - i0, fy = gy - j0;
+    const a = z[j0 * nx + i0], b = z[j0 * nx + i0 + 1], c = z[(j0 + 1) * nx + i0], d = z[(j0 + 1) * nx + i0 + 1];
+    out[0] = a * (1 - fx) * (1 - fy) + b * fx * (1 - fy) + c * (1 - fx) * fy + d * fx * fy;
+    out[1] = ((b - a) * (1 - fy) + (d - c) * fy) / h;
+    out[2] = ((c - a) * (1 - fx) + (d - b) * fx) / h;
+  }
+  kickPoint(v) {                     // where kicks land, by variation
+    const W = CONFIG.W, H = CONFIG.H, [cx, cy] = CONFIG.CENTER, n = this.kickCount;
+    if (v === 0) return [cx, cy];
+    if (v === 1) return [n % 2 ? W * 0.28 : W * 0.72, cy];
+    if (v === 2) { const q = [[0.3, 0.3], [0.7, 0.3], [0.7, 0.66], [0.3, 0.66]][n % 4]; return [q[0] * W, q[1] * H]; }
+    const a = n * 0.9; return [cx + Math.cos(a) * 280, cy + Math.sin(a) * 440];
+  }
+  emitters(v) {                      // where lasers fire from, by variation
+    const W = CONFIG.W, H = CONFIG.H;
+    return [
+      [[0, H], [W, H]],
+      [[W / 2, 0], [W / 2, H]],
+      [[0, H * 0.33], [W, H * 0.33], [0, H * 0.67], [W, H * 0.67]],
+      [[0, 0], [W, 0], [0, H], [W, H]],
+    ][v % 4];
+  }
+  tracePath(x, y, ang, len) {         // a beam's path, reflecting off the frame edges
+    const W = CONFIG.W, H = CONFIG.H, pts = [[x, y]], cum = [0];
+    let dx = Math.cos(ang), dy = Math.sin(ang), left = len, total = 0;
+    x = clamp(x, 1, W - 1); y = clamp(y, 1, H - 1);
+    for (let b = 0; b <= FLUX.LASER_BOUNCES && left > 0; b++) {
+      const tx = dx > 1e-9 ? (W - x) / dx : dx < -1e-9 ? -x / dx : Infinity;
+      const ty = dy > 1e-9 ? (H - y) / dy : dy < -1e-9 ? -y / dy : Infinity;
+      const t = Math.min(tx, ty, left);
+      x += dx * t; y += dy * t; left -= t; total += t;
+      pts.push([x, y]); cum.push(total);
+      if (t === tx) dx = -dx; if (t === ty) dy = -dy;
+    }
+    return { pts, cum, total };
+  }
+
+  step(i) {
+    const C = FLUX, F = this.F, rng = this.rng, W = CONFIG.W, H = CONFIG.H, [cx, cy] = CONFIG.CENTER;
+    this.frame = i;
+    const E = STORY.energy(i), v = STORY.variant(i);
+    const Lk = STORY.layer("kicks", i), Lp = STORY.layer("packets", i), Ll = STORY.layer("lasers", i);
+    this.E = E; this.Lg = STORY.layer("grid", i);
+    const target = PALETTES[C.PALETTE_LOCK >= 0 ? C.PALETTE_LOCK : STORY.palette(i, F)];
+    const kp = 1 - Math.exp(-1.2 * DT);
+    for (let a = 0; a < 4; a++) for (let c = 0; c < 3; c++) this.pal[a][c] += (target[a][c] - this.pal[a][c]) * kp;
+
+    // kicks: a pulse into the grid at the kick point
+    const nx = this.nx, ny = this.ny, h = this.h, z = this.z, zv = this.zv;
+    if (F.kickHits.has(i) && Lk > 0.01) {
+      const s = (0.4 + 0.6 * F.kickHits.get(i)) * C.KICK_PULSE * Lk * (0.5 + 0.5 * E);
+      const [kx, ky] = this.kickPoint(v); this.kickCount++; this.lastKick = [kx, ky];
+      for (let j = 1; j < ny - 1; j++) for (let k = 1; k < nx - 1; k++) {
+        const dx = k * h - kx, dy = j * h - ky; zv[j * nx + k] -= s * Math.exp(-(dx * dx + dy * dy) / (2 * 70 * 70));
+      }
+    }
+    // the grid: 2-D wave equation, edges pinned; the bass makes it sag under the last kick
+    const bass = 0.6 * F.sub[i] + 0.4 * F.bass[i], sag = C.BASS_SAG * bass * Lk, [bx, by] = this.lastKick;
+    const sub = 2, dt = DT / sub, c2 = C.WAVE_SPEED * C.WAVE_SPEED / (h * h);
+    for (let s = 0; s < sub; s++) {
+      for (let j = 1; j < ny - 1; j++) for (let k = 1; k < nx - 1; k++) {
+        const q = j * nx + k, lap = z[q - 1] + z[q + 1] + z[q - nx] + z[q + nx] - 4 * z[q];
+        const dx = k * h - bx, dy = j * h - by;
+        const f = sag > 0 ? -sag * c2 / 45 * Math.exp(-(dx * dx + dy * dy) / (2 * 220 * 220)) : 0;   // settles ~sag px deep
+        zv[q] += (c2 * lap - C.GRID_DAMP * zv[q] + f) * dt;
+      }
+      for (let q = 0; q < z.length; q++) z[q] += zv[q] * dt;
+    }
+
+    // melody: rising notes release packets of energy at random places
+    const ch = F.chroma.subarray(i * 12, i * 12 + 12), harm = F.harmonic[i] * (0.4 + 0.6 * F.tonal[i]);
+    for (let k = 0; k < 12; k++) {
+      const rise = ch[k] - this.prevChroma[k];
+      this.prevChroma[k] = ch[k] * 0.7 + this.prevChroma[k] * 0.3;
+      if (rise > 0.2 && harm > 0.1 && Lp > 0.05 && this.packets.length < C.MAX_PACKETS &&
+          rng() < C.PACKET_RATE * Lp * (0.3 + 0.7 * E) * rise * 3) {
+        const a = rng() * 2 * Math.PI, sp = C.PACKET_SPEED * (0.6 + 0.5 * E) * (0.7 + 0.6 * rng());
+        const x = 60 + rng() * (W - 120), y = 60 + rng() * (H - 120);
+        this.packets.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, col: STRING_COLORS[k],
+                            life: C.PACKET_LIFE * (0.7 + 0.6 * rng()), age: 0, trail: [[x, y]] });
+      }
+    }
+    // packets fly straight, bounce off the frame, and roll downhill on the flexing grid
+    const tmp = this.tmp;
+    for (const p of this.packets) {
+      for (let s = 0; s < 2; s++) {
+        this.sample(p.x, p.y, tmp);
+        p.vx -= C.PACKET_PULL * tmp[1] * dt; p.vy -= C.PACKET_PULL * tmp[2] * dt;
+        const sp = Math.hypot(p.vx, p.vy); if (sp > 1100) { p.vx *= 1100 / sp; p.vy *= 1100 / sp; }
+        p.x += p.vx * dt; p.y += p.vy * dt;
+        if (p.x < 0) { p.x = -p.x; p.vx = Math.abs(p.vx); } if (p.x > W) { p.x = 2 * W - p.x; p.vx = -Math.abs(p.vx); }
+        if (p.y < 0) { p.y = -p.y; p.vy = Math.abs(p.vy); } if (p.y > H) { p.y = 2 * H - p.y; p.vy = -Math.abs(p.vy); }
+      }
+      p.trail.unshift([p.x, p.y]); if (p.trail.length > 22) p.trail.pop();
+      p.age += DT;
+    }
+    this.packets = this.packets.filter(p => p.age < p.life);
+
+    // cymbals: laser beams from fixed points, bouncing round the frame; loud ones fire a fan of three
+    if (F.hatHits.has(i) && Ll > 0.05 && E > 0.15 && rng() < 0.4 + 0.6 * E) {
+      const s = F.hatHits.get(i) * (0.3 + F.air[i]), fan = s > 0.7 ? 3 : 1;
+      const em = this.emitters(v), [ox, oy] = em[this.laserPtr++ % em.length];
+      const base = Math.atan2(cy - oy, cx - ox) + rng.normal(0, 0.45);
+      for (let f = 0; f < fan; f++) {
+        const ang = base + (f - (fan - 1) / 2) * 0.12;
+        this.lasers.push({ path: this.tracePath(ox, oy, ang, C.LASER_SPEED * C.LASER_LIFE), age: 0, amp: (0.4 + 0.6 * s) * Ll * (0.5 + 0.5 * E) });
+      }
+      if (this.lasers.length > 24) this.lasers.splice(0, this.lasers.length - 24);
+    }
+    for (const L of this.lasers) L.age += DT;
+    this.lasers = this.lasers.filter(L => L.age * C.LASER_SPEED - C.LASER_TAIL < L.path.total);
+  }
+
+  draw() {
+    const r = renderer, gl = r.gl, C = FLUX, F = this.F, i = this.frame, s = r.scale;
+    const [cx, cy] = CONFIG.CENTER, W = CONFIG.W, H = CONFIG.H, [, cold, hot, accent] = this.pal;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, r.acc.fb); gl.viewport(0, 0, r.acc.w, r.acc.h); gl.bindVertexArray(r.vao);
+    gl.enable(gl.BLEND); gl.blendColor(0, 0, 0, C.TRAIL); gl.blendFunc(gl.ZERO, gl.CONSTANT_ALPHA);
+    gl.useProgram(r.pFade.p); gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    let n = 0; const tmp = this.tmp;
+
+    // the grid, bent sideways by its own slope and lit where it is displaced
+    const gi = C.GRID_INT * this.Lg * (0.35 + 0.65 * this.E);
+    if (gi > 0.002) {
+      const dot = (x, y) => {
+        this.sample(x, y, tmp);
+        const a = Math.min(1, Math.abs(tmp[0]) / 25);
+        r.pushDot(n++, x - C.FLEX * tmp[1], y - C.FLEX * tmp[2],
+          cold[0] + (hot[0] - cold[0]) * a, cold[1] + (hot[1] - cold[1]) * a, cold[2] + (hot[2] - cold[2]) * a, gi * (0.3 + 0.7 * a));
+      };
+      for (let k = 0; k < this.nx; k++) for (let y = 0; y <= H; y += 2) dot(k * this.h, y);
+      for (let j = 0; j < this.ny; j++) for (let x = 0; x <= W; x += 2) dot(x, j * this.h);
+    }
+    // packets: a bright head and a fading trail
+    for (const p of this.packets) {
+      const f = Math.min(1, p.age / 0.2) * Math.min(1, (p.life - p.age) / 0.8), c = p.col;
+      for (let q = 0; q < 16; q++) { const a = q * 0.3927; r.pushDot(n++, p.x + Math.cos(a) * 4.5, p.y + Math.sin(a) * 4.5, c[0], c[1], c[2], 0.9 * f); }
+      for (let q = 0; q < 4; q++) r.pushDot(n++, p.x + (q & 1) * 1.5 - 0.75, p.y + (q >> 1) * 1.5 - 0.75, 1, 1, 1, 0.9 * f);   // white-hot core
+      for (let t = 0; t + 1 < p.trail.length; t++) {
+        const [x0, y0] = p.trail[t], [x1, y1] = p.trail[t + 1], len = Math.hypot(x1 - x0, y1 - y0);
+        if (len > 200) continue;                                   // skip the jump across a bounce wrap
+        const m = Math.max(1, Math.ceil(len / 2)), w = 0.7 * f * (1 - t / p.trail.length);
+        for (let q = 0; q < m; q++) { const u = q / m; r.pushDot(n++, x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, c[0], c[1], c[2], w); }
+      }
+    }
+    // laser beams: a bright head racing along the bounce path with a tail behind it
+    const lc = accent.map(v => 0.45 + 0.55 * v);
+    for (const L of this.lasers) {
+      const head = L.age * C.LASER_SPEED, tail = head - C.LASER_TAIL, { pts, cum, total } = L.path;
+      const fade = Math.max(0, 1 - L.age / (C.LASER_LIFE + 0.15));
+      let seg = 0;
+      for (let d = Math.max(0, tail); d <= Math.min(head, total); d += 2.5) {
+        while (seg < cum.length - 2 && cum[seg + 1] < d) seg++;
+        const u = (d - cum[seg]) / Math.max(1e-6, cum[seg + 1] - cum[seg]);
+        const x = pts[seg][0] + (pts[seg + 1][0] - pts[seg][0]) * u, y = pts[seg][1] + (pts[seg + 1][1] - pts[seg][1]) * u;
+        const w = Math.pow(clamp((d - tail) / C.LASER_TAIL, 0, 1), 1.5);
+        r.pushDot(n++, x, y, lc[0], lc[1], lc[2], C.LASER_INT * L.amp * w * fade * 0.9);
+      }
+    }
+    const D = r.pDots, zoom = 1 + 0.02 * F.kick[i] * this.E;
+    gl.bindVertexArray(r.dotVao); gl.bindBuffer(gl.ARRAY_BUFFER, r.dotBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, r.dots.subarray(0, n * 6), gl.STREAM_DRAW);
+    gl.useProgram(D.p); gl.uniform1f(D.u.u_mult, s);
+    gl.uniform2f(D.u.u_center, cx, cy); gl.uniform2f(D.u.u_rot, 1, 0); gl.uniform1f(D.u.u_zoom, zoom); gl.uniform2f(D.u.u_world, W, H);
+    gl.drawArrays(gl.POINTS, 0, n);
+    gl.disable(gl.BLEND);
+    this.points = n;
+    r.compose({ F, frame: i, bg: this.pal[0], glow: C.GLOW, exposure: C.EXPOSURE, fadeIn: C.FADE_IN, fadeOut: C.FADE_OUT });
+  }
+  stats() { return [["packets", this.packets.length], ["lasers", this.lasers.length], ["points", (this.points || 0).toLocaleString()]]; }
+}
+
 // =========================== VISUALISER MENU ===============================
 // Every visualiser shares the analysis, playback, recording and glow pass, and brings its own
 // physics, drawing, settings and "how the music drives it" table.
@@ -1459,6 +1821,7 @@ const VISUALISERS = [
       ["Brightness", "Warmth of the particle colours"],
       ["Song sections", "Palette changes; quiet sections loosen gravity into a halo"],
     ],
+    layers: [],
     create: F => new Scene(F, CONFIG.N_PARTICLES),
   },
   {
@@ -1476,6 +1839,7 @@ const VISUALISERS = [
       ["Loudness", "Ink brightness"],
       ["Song sections", "Palette changes; quiet sections fade the ink slowly, leaving long smoky trails"],
     ],
+    layers: [],
     create: F => new InkTide(F),
   },
   {
@@ -1493,7 +1857,25 @@ const VISUALISERS = [
       ["Brightness", "Sun glints on the ripples"],
       ["Song sections", "Palette changes; quiet sections damp less, so ripples linger"],
     ],
+    layers: [],
     create: F => new RippleTank(F),
+  },
+  {
+    id: "flux-lattice", name: "Flux Lattice", status: "On trial",
+    blurb: "A flexing grid, bouncing energy packets and laser beams",
+    config: FLUX, sliders: FLUX_SLIDERS, particles: false,
+    hints: { sub: "sag", kick: "waves", snare: "–", lowmid: "–", hat: "lasers", centroid: "–" },
+    mapping: [
+      ["Kick", "A wave through the grid from a point; where it lands depends on the section's variation"],
+      ["Sub + bass", "The grid sags under the last kick point"],
+      ["Rising notes", "Packets of energy appear at random, coloured by note; they bounce off the frame and roll along the flexing grid"],
+      ["Hats / cymbals", "Laser beams from fixed points that bounce round the frame; loud cymbals fire a fan of three"],
+      ["Story energy", "Brightness, wave strength, how many packets and beams"],
+      ["Story effects", "Which of grid, kick waves, packets and lasers are on in each section (they fade in and out)"],
+      ["Story variation", "Where kicks land, where lasers fire from, and the palette, so repeated sections look different"],
+    ],
+    layers: ["grid", "kicks", "packets", "lasers"],
+    create: F => new FluxLattice(F),
   },
 ];
 VISUALISERS.forEach(v => { v.defaults = JSON.parse(JSON.stringify(v.config)); });
@@ -1545,6 +1927,7 @@ const app = {
   F: null, buffer: null, scene: null, name: "demo",
   ctx: null, src: null, playing: false, startAt: 0, offset: 0,
   recording: null, recBlob: null, downloads: null, scale: 0.5, sceneKey: null,
+  story: null, storyEval: null, storyOn: true, selSec: 0,
   vis: VISUALISERS.find(v => "#" + v.id === location.hash) || VISUALISERS[0],
   fpsT: performance.now(), fpsN: 0, fps: 0, busy: false,
 };
@@ -1618,11 +2001,118 @@ async function selectVis(id) {
   if (!v || app.recording || app.busy) { markMenu(); return; }
   if (location.hash !== "#" + v.id) { try { location.hash = v.id; } catch (_) {} }
   if (v === app.vis) return;
-  app.vis = v; markMenu(); buildSettings();
+  app.vis = v; markMenu(); buildSettings(); renderSectionEditor(); drawStory();
   if (app.F) { stopPlayback(); app.busy = true; setEnabled(false); try { await buildPoster(); } finally { app.busy = false; setEnabled(true); } }
 }
 window.addEventListener("hashchange", () => { const id = location.hash.slice(1); if (id && id !== app.vis.id) selectVis(id); });
 buildMenu(); markMenu();
+
+// ----- story tab -----
+const storyKey = () => "visualz-story:" + app.name + ":" + Math.round(app.F.duration);
+function saveStory() { try { localStorage.setItem(storyKey(), JSON.stringify(app.story)); } catch (_) {} }
+function initStory() {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(storyKey()) || "null"); } catch (_) {}
+  if (!s || !s.sections || s.sig !== app.F.secEnergy.length + ":" + Math.round(app.F.duration)) s = autoStory(app.F);
+  app.story = s; app.selSec = Math.min(app.selSec, s.sections.length - 1);
+  app.storyEval = evalStory(s, app.F);
+  renderSectionEditor(); drawStory();
+}
+function storyChanged(redrawEditor) {
+  app.story.auto = false; app.storyEval = evalStory(app.story, app.F); saveStory();
+  if (redrawEditor) renderSectionEditor();
+  drawStory(); if (!app.playing) redrawStill();
+}
+const themeName = sec => String.fromCharCode(65 + (sec.theme % 26)) + (sec.occ || sec.variation + 1);   // e.g. A3 = third time A plays
+function setTab(story) {
+  $("storyPanel").hidden = !story;
+  document.querySelectorAll(".rack-col").forEach(c => { c.hidden = story; });
+  $("tabStory").setAttribute("aria-selected", String(story)); $("tabControls").setAttribute("aria-selected", String(!story));
+  if (story) { renderSectionEditor(); drawStory(); }
+}
+$("tabControls").addEventListener("click", () => setTab(false));
+$("tabStory").addEventListener("click", () => setTab(true));
+$("storyOn").addEventListener("change", e => { app.storyOn = e.target.checked; drawStory(); if (!app.playing) redrawStill(); });
+$("storyAuto").addEventListener("click", () => {
+  if (!app.F) return;
+  app.story = autoStory(app.F); app.storyEval = evalStory(app.story, app.F); saveStory();
+  renderSectionEditor(); drawStory(); if (!app.playing) redrawStill();
+});
+function renderSectionEditor() {
+  if (!app.story) return;
+  const S = app.story, s = app.selSec, sec = S.sections[s];
+  $("seTitle").textContent = `Section ${s + 1} · ${themeName(sec)}` + (s === S.drop ? " · the drop" : "");
+  $("seWhen").textContent = `${fmtTime(sec.start)} – ${fmtTime(sec.end)}`;
+  $("seLevel").value = sec.level; $("seLevelOut").textContent = Math.round(sec.level * 100) + "%";
+  const shape = $("seShape"); shape.textContent = "";
+  for (const [k, label] of Object.entries(SHAPES)) {
+    const b = document.createElement("button"); b.textContent = label; b.setAttribute("aria-pressed", String(sec.shape === k));
+    b.addEventListener("click", () => { sec.shape = k; storyChanged(true); });
+    shape.appendChild(b);
+  }
+  const chips = $("seLayers"); chips.textContent = "";
+  const names = app.vis.layers;
+  if (!names.length) { const p = document.createElement("span"); p.className = "note"; p.textContent = app.vis.name + " follows the energy line only; switch to #4 to set effects."; chips.appendChild(p); }
+  for (const k of names) {
+    const b = document.createElement("button"); b.textContent = LAYER_NAMES[k]; b.setAttribute("aria-pressed", String(!!sec.layers[k]));
+    b.addEventListener("click", () => { sec.layers[k] = !sec.layers[k]; storyChanged(true); });
+    chips.appendChild(b);
+  }
+  $("seVar").value = String(sec.variation);
+  $("seVarNote").textContent = "Changes where kicks land, where lasers fire from, and the palette.";
+}
+$("seLevel").addEventListener("input", e => {
+  const sec = app.story.sections[app.selSec]; sec.level = +e.target.value;
+  $("seLevelOut").textContent = Math.round(sec.level * 100) + "%"; storyChanged(false);
+});
+$("seVar").addEventListener("change", e => { app.story.sections[app.selSec].variation = +e.target.value; storyChanged(true); });
+function drawStory() {
+  const cv = $("storyCanvas"); if (!cv || $("storyPanel").hidden) return;
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  if (!w) return;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  if (!app.F || !app.story) return;
+  const css = getComputedStyle(document.documentElement), tok = k => css.getPropertyValue(k).trim();
+  const photon = tok("--photon"), muted = tok("--muted"), line = tok("--line"), text = tok("--text");
+  const F = app.F, S = app.story, ev = app.storyEval, X = t => t / F.duration * w;
+  const lanes = app.vis.layers, laneH = 13, lanesTop = h - lanes.length * (laneH + 4) - 6;
+  const top = 24, bot = lanesTop - 10;
+  const LANE_COLS = { grid: "#7aa2ff", kicks: "#ff8a5c", packets: "#c38bff", lasers: "#7ff0d8" };
+  S.sections.forEach((sec, s) => {
+    const x0 = X(sec.start), x1 = X(sec.end);
+    if (s === app.selSec) { g.fillStyle = photon; g.globalAlpha = 0.14; g.fillRect(x0, 0, x1 - x0, h); g.globalAlpha = 1; }
+    g.fillStyle = line; g.fillRect(Math.round(x0), 0, 1, h);
+    g.fillStyle = s === app.selSec ? text : muted; g.font = "600 11px " + tok("--font-mono");
+    if (x1 - x0 > 22) g.fillText(themeName(sec), x0 + 5, 15);
+    if (s === S.drop && x1 - x0 > 60) { g.fillStyle = photon; g.fillText("DROP", x0 + 30, 15); }
+    lanes.forEach((k, j) => {
+      if (!sec.layers[k]) return;
+      g.fillStyle = LANE_COLS[k]; g.globalAlpha = app.storyOn ? 0.75 : 0.3;
+      g.fillRect(x0 + 1, lanesTop + j * (laneH + 4), Math.max(0, x1 - x0 - 2), laneH); g.globalAlpha = 1;
+    });
+  });
+  lanes.forEach((k, j) => { g.fillStyle = "#0b0c14"; g.font = "600 9px " + tok("--font-mono"); g.fillText(LAYER_NAMES[k].toUpperCase(), 6, lanesTop + j * (laneH + 4) + 10); });
+  // energy line
+  g.beginPath(); g.moveTo(0, bot);
+  for (let x = 0; x <= w; x++) { const i = Math.min(F.nframes - 1, Math.floor(x / w * F.nframes)); g.lineTo(x, bot - ev.energy[i] * (bot - top)); }
+  g.lineTo(w, bot); g.closePath();
+  g.fillStyle = photon; g.globalAlpha = app.storyOn ? 0.22 : 0.08; g.fill(); g.globalAlpha = app.storyOn ? 1 : 0.35;
+  g.beginPath();
+  for (let x = 0; x <= w; x++) { const i = Math.min(F.nframes - 1, Math.floor(x / w * F.nframes)); const y = bot - ev.energy[i] * (bot - top); x ? g.lineTo(x, y) : g.moveTo(x, y); }
+  g.strokeStyle = photon; g.lineWidth = 2; g.stroke(); g.globalAlpha = 1;
+  if (!app.storyOn) { g.fillStyle = muted; g.font = "600 11px " + tok("--font-mono"); g.fillText("STORY OFF: visualisers follow the music only", 8, bot - 8); }
+  // playhead
+  const fr = app.scene ? Math.max(0, app.scene.frame) : 0;
+  g.fillStyle = text; g.fillRect(Math.round(X(fr / FPS)), 0, 1.5, h);
+}
+$("storyCanvas").addEventListener("click", e => {
+  if (!app.story) return;
+  const r = e.currentTarget.getBoundingClientRect(), t = (e.clientX - r.left) / r.width * app.F.duration;
+  const s = app.story.sections.findIndex(sec => t >= sec.start && t < sec.end);
+  if (s >= 0) { app.selSec = s; renderSectionEditor(); drawStory(); }
+});
+window.addEventListener("resize", () => drawStory());
 
 // ----- meters -----
 const METERS = [["sub", "SUB", "well"], ["kick", "KICK", "blast"], ["snare", "SNARE", "rings"], ["lowmid", "LOW MID", "spin"], ["hat", "HATS", "sparks"], ["centroid", "BRIGHT", "warmth"]];
@@ -1665,6 +2155,7 @@ async function loadBuffer(buf, name) {
   $("tDur").textContent = fmtTime(F.duration);
   const tr = $("trackBar"); tr.querySelectorAll(".sec").forEach(e => e.remove());
   for (const st of F.sectionTimes.slice(1)) { const m = document.createElement("div"); m.className = "sec"; m.style.left = (st / F.duration * 100) + "%"; tr.appendChild(m); }
+  initStory();
   await buildPoster();
   app.busy = false; setEnabled(true);
 }
@@ -1764,6 +2255,7 @@ function loop() {
   while (sc.frame < target && performance.now() - t0 < 40) { sc.step(sc.frame + 1); stepped = true; }
   if (stepped) {
     sc.draw(); updateMeters(sc.frame); setProgress(sc.frame / FPS);
+    if (!$("storyPanel").hidden && sc.frame % 3 === 0) drawStory();
     app.fpsN++; const now = performance.now();
     if (now - app.fpsT > 1000) { app.fps = app.fpsN * 1000 / (now - app.fpsT); app.fpsN = 0; app.fpsT = now; showPerf(target - sc.frame); }
     if (app.recording) $("recTime").textContent = fmtTime(sc.frame / FPS) + " / " + fmtTime(F.duration);
