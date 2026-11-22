@@ -1,4 +1,4 @@
-<title>Gravity Harp</title>
+<title>Visualz</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -30,6 +30,17 @@ body {
   padding-block: 16px 32px;
 }
 .app { display: grid; gap: 20px; max-width: 1560px; margin: 0 auto; grid-template-columns: minmax(0, 1fr); --stage-w: min(100%, calc(82vh * 9 / 16)); }
+.vis-menu { display: flex; gap: 8px; overflow-x: auto; grid-column: 1 / -1; min-width: 0; padding-bottom: 2px; }
+.vis-card {
+  flex: 1 0 210px; max-width: 340px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 1px 10px;
+  align-items: center; text-align: left; padding: 8px 12px; min-height: 0; border-radius: 12px; background: var(--rack);
+}
+.vis-card[aria-pressed="true"] { border-color: var(--photon); background: var(--rack-2); }
+.vis-card .num { font-family: var(--font-mono); font-size: 0.72rem; color: var(--photon); grid-row: span 2; }
+.vis-card .nm { font-family: var(--font-display); font-weight: 500; font-size: 0.82rem; }
+.vis-card .st { font-family: var(--font-mono); font-weight: 400; font-size: 0.6rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); border-radius: 99px; padding: 1px 7px; }
+.vis-card .st.kept { color: var(--photon); border-color: color-mix(in srgb, var(--photon) 45%, var(--line)); }
+.vis-card .bl { grid-column: 2 / -1; font-weight: 400; font-size: 0.72rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rack-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 
 header.brand { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -141,7 +152,7 @@ table.map td:first-child { color: var(--photon); font-family: var(--font-mono); 
 <div class="app">
   <div class="stage-col">
     <header class="brand">
-      <h1>Gravity Harp <small>Visualz · POC</small></h1>
+      <h1><span id="visName">Gravity Harp</span> <small>Visualz · POC</small></h1>
       <span class="tag">1080 × 1920 · 30 fps</span>
     </header>
     <div class="stage" id="stage">
@@ -168,6 +179,7 @@ table.map td:first-child { color: var(--photon); font-family: var(--font-mono); 
   </div>
 
   <div class="rack">
+   <nav class="vis-menu" id="visMenu" aria-label="Choose a visualiser"></nav>
    <div class="rack-col">
     <section class="panel" aria-labelledby="h-track">
       <h2 id="h-track">Track</h2>
@@ -206,7 +218,7 @@ table.map td:first-child { color: var(--photon); font-family: var(--font-mono); 
       <div id="sliders" style="display:flex;flex-direction:column;gap:10px"></div>
       <div class="pair">
         <label for="palSel">Palette<select id="palSel"></select></label>
-        <label for="partSel">Particles<select id="partSel">
+        <label for="partSel" id="partWrap">Particles<select id="partSel">
           <option value="12000">12,000 (light)</option>
           <option value="24000">24,000</option>
           <option value="34000" selected>34,000 (as Python)</option>
@@ -219,22 +231,13 @@ table.map td:first-child { color: var(--photon); font-family: var(--font-mono); 
         </select></label>
         <button id="resetBtn">Reset settings</button>
       </div>
-      <p class="note">Particle count and render size apply on the next play or record.</p>
+      <p class="note" id="applyNote">Particle count and render size apply on the next play or record.</p>
     </section>
 
     <section class="panel">
       <details>
         <summary>How the music drives it</summary>
-        <table class="map">
-          <tr><td>Sub + bass</td><td>Mass of the central gravity well; the photon ring swells</td></tr>
-          <tr><td>Kick</td><td>Radial pressure blast from the core, plus a small camera punch-in</td></tr>
-          <tr><td>Snare</td><td>Expanding shockwave rings that shove particles</td></tr>
-          <tr><td>Low mids</td><td>Disk spin</td></tr>
-          <tr><td>Hats + air</td><td>Curl-noise turbulence and sparks thrown off the strings</td></tr>
-          <tr><td>12 pitch classes</td><td>12 vibrating strings (wave equation), coloured round the circle of fifths</td></tr>
-          <tr><td>Brightness</td><td>Warmth of the particle colours</td></tr>
-          <tr><td>Song sections</td><td>Palette changes; quiet sections loosen gravity into a halo</td></tr>
-        </table>
+        <table class="map" id="mapTable"></table>
       </details>
       <div class="stats" id="perf"></div>
     </section>
@@ -589,6 +592,10 @@ class Scene {
     this.frame = -1;
   }
 
+  draw() { renderer.draw(this); }
+  stats() { return [["particles", this.N.toLocaleString()], ["points", (renderer.lastDots || 0).toLocaleString()]]; }
+  dispose() {}
+
   stringPoints() {   // world positions of all string nodes, as 12 x {x, y}
     const C = CONFIG, NN = C.STRING_NODES, [cx, cy] = C.CENTER, pts = [];
     for (let k = 0; k < 12; k++) {
@@ -749,6 +756,7 @@ class Renderer {
     const FS_VERT = `#version 300 es
       out vec2 v_uv;
       void main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); v_uv = p; gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }`;
+    this.FS_VERT = FS_VERT;
     const CAM = `
       uniform vec2 u_center; uniform vec2 u_rot; uniform float u_zoom; uniform vec2 u_world;
       vec4 cam(vec2 p){
@@ -960,19 +968,21 @@ class Renderer {
     gl.uniform2f(Q.u.u_world, C.W, C.H); gl.uniform2f(Q.u.u_c, cx, cy); gl.uniform1f(Q.u.u_r, Math.floor(pr * zoom * 0.8));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-    this.compose(sc, zoom);
+    this.compose({ F, frame: i, bg: sc.pal[0], glow: C.GLOW, exposure: C.EXPOSURE, fadeIn: C.FADE_IN, fadeOut: C.FADE_OUT });
     this.lastDots = n + N;
   }
 
   pass(prog, dst, setup) {
     const gl = this.gl; gl.bindFramebuffer(gl.FRAMEBUFFER, dst ? dst.fb : null);
     gl.viewport(0, 0, dst ? dst.w : this.canvas.width, dst ? dst.h : this.canvas.height);
-    gl.useProgram(prog.p); setup(prog.u); gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindVertexArray(this.vao); gl.useProgram(prog.p); setup(prog.u); gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
   bindTex(unit, t) { const gl = this.gl; gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t.tex); }
 
-  compose(sc, zoom) {
-    const C = CONFIG, gl = this.gl, F = sc.F, i = sc.frame, s = this.scale;
+  // shared finishing pass: two-scale bloom, background glow, tone map, vignette, fades, grain.
+  // o = { F, frame, bg, glow, exposure, fadeIn, fadeOut }
+  compose(o) {
+    const C = CONFIG, gl = this.gl, F = o.F, i = o.frame, s = this.scale;
     // bloom at two scales (quarter and sixteenth resolution)
     const down = (src, dst) => this.pass(this.pDown, dst, u => { this.bindTex(0, src); gl.uniform1i(u.u_tex, 0); gl.uniform2f(u.u_texel, 1 / src.w, 1 / src.h); });
     const blur = (a, b, sigma) => {
@@ -983,18 +993,311 @@ class Renderer {
     down(this.acc, this.q1); down(this.q1, this.s1);
     blur(this.q1, this.q2, Math.max(0.75, 4 * s)); blur(this.s1, this.s2, Math.max(0.75, 3 * s));
     const t = i * DT, dur = F.duration;
-    const fade = Math.min(1, t / C.FADE_IN, Math.max(0, (dur - t) / C.FADE_OUT));
+    const fade = Math.min(1, t / o.fadeIn, Math.max(0, (dur - t) / o.fadeOut));
     this.pass(this.pComp, null, u => {
       this.bindTex(0, this.acc); this.bindTex(1, this.q1); this.bindTex(2, this.s1);
       gl.uniform1i(u.u_acc, 0); gl.uniform1i(u.u_b1, 1); gl.uniform1i(u.u_b2, 2);
       gl.uniform2f(u.u_world, C.W, C.H); gl.uniform2f(u.u_center, C.CENTER[0], C.CENTER[1]);
-      gl.uniform3fv(u.u_bg, sc.pal[0]);
+      gl.uniform3fv(u.u_bg, o.bg);
       gl.uniform1f(u.u_lift, 0.5 + 1.2 * F.energySlow[i] + 0.6 * F.bass[i]);
-      gl.uniform1f(u.u_glow, C.GLOW); gl.uniform1f(u.u_exposure, C.EXPOSURE); gl.uniform1f(u.u_fade, fade);
+      gl.uniform1f(u.u_glow, o.glow); gl.uniform1f(u.u_exposure, o.exposure); gl.uniform1f(u.u_fade, fade);
       gl.uniform1f(u.u_seed, (i % 8) + 1); gl.uniform2f(u.u_res, this.canvas.width, this.canvas.height);
     });
   }
 }
+
+// =========================== VISUALISER 2: INK TIDE ========================
+// Coloured ink in a 2-D incompressible fluid: "stable fluids" Navier–Stokes on the GPU
+// (advection, vorticity confinement, pressure projection). Settings below; sliders edit them live.
+const INK = {
+  SEED: 11,
+  SIM_W: 144, SIM_H: 256,           // velocity / pressure grid (square cells, 9:16)
+  DYE_W: 540, DYE_H: 960,           // ink resolution
+  SUBSTEPS: 2, PRESSURE_ITERS: 30,
+  VISCOSITY: 0.6,                   // how fast motion dies away, 1/s
+  INK_FADE: 1.4,                    // how fast ink fades in busy sections, 1/s
+  INK_FADE_CALM: 0.5,               // ... and in quiet sections: long smoky trails
+  INK_FLOOR: 0.06,                  // thin, well-mixed ink below this goes black, so streams stay crisp
+  SWIRL: 150,                       // low mids: spin around the core (a force, per second)
+  VORTICITY: 6, VORTICITY_HATS: 35, // hats + air: curly turbulence (vorticity confinement)
+  KICK_PUSH: 900, KICK_INK: 0.5,    // kick: a ring of jets bursting out of the core
+  KICK_JETS: 6,
+  SNARE_JET: 1500, SNARE_INK: 0.5,  // snare: jets from the sides
+  BASS_PLUME: 2500, BASS_INK: 0.04, // sub + bass: plume rising from the bottom (a force, per second)
+  NOTE_INK: 0.05, NOTE_FLOW: 3000, RING_RADIUS: 360,  // 12 note nozzles on a ring (a force, per second)
+  HAT_JETS: 3, HAT_JET: 600, HAT_INK: 0.08,
+  INK_GAIN: 1.0, SHADE: 0.6,        // ink brightness, relief lighting (0 = flat)
+  GLOW: 0.45, EXPOSURE: 1.7, FADE_IN: 1.5, FADE_OUT: 3.0,
+  PALETTE_LOCK: -1,                 // -1 = follow song sections
+};
+const INK_SLIDERS = [
+  ["GLOW", "Glow", 0, 2.5, 0.05],
+  ["EXPOSURE", "Exposure", 0.6, 3, 0.05],
+  ["INK_FADE", "Ink fade", 0.1, 3, 0.05],
+  ["INK_FLOOR", "Ink contrast", 0, 0.3, 0.01],
+  ["VISCOSITY", "Viscosity", 0, 2, 0.05],
+  ["KICK_PUSH", "Kick blast", 0, 2500, 50],
+  ["SNARE_JET", "Snare jets", 0, 3000, 50],
+  ["VORTICITY_HATS", "Hat turbulence", 0, 80, 1],
+];
+
+function inkPrograms(r) {
+  if (r._ink) return r._ink;
+  const V = r.FS_VERT, H = `#version 300 es
+    precision highp float; precision highp sampler2D; in vec2 v_uv; out vec4 o;`;
+  const NB = `
+    vec4 nb(sampler2D t, vec2 tx, out vec4 L, out vec4 R, out vec4 T, out vec4 B){
+      L = texture(t, v_uv - vec2(tx.x, 0.0)); R = texture(t, v_uv + vec2(tx.x, 0.0));
+      T = texture(t, v_uv + vec2(0.0, tx.y)); B = texture(t, v_uv - vec2(0.0, tx.y));
+      return texture(t, v_uv); }`;
+  r._ink = {
+    // up to 24 gaussian splats per pass. mode 0: add a colour, 2: a gaussian vortex (divergence-free)
+    splat: r.program(V, `${H}
+      uniform sampler2D u_src; uniform float u_aspect; uniform int u_n; uniform vec4 u_s[24]; uniform vec3 u_c[24];
+      void main(){
+        vec3 base = texture(u_src, v_uv).xyz;
+        for (int k = 0; k < 24; k++) {
+          if (k >= u_n) break;
+          vec2 p = v_uv - u_s[k].xy; p.x *= u_aspect;
+          float g = exp(-dot(p, p) / u_s[k].z), m = u_s[k].w;
+          if (m < 0.5) base += g * u_c[k];
+          else if (m < 1.5) base.xy += g * u_c[k].x * p / (length(p) + 1e-4);
+          else base.xy += g * u_c[k].x * vec2(-p.y, p.x) / sqrt(u_s[k].z);
+        }
+        o = vec4(base, 1.0);
+      }`),
+    curl: r.program(V, `${H} uniform sampler2D u_vel; uniform vec2 u_tx; ${NB}
+      void main(){ vec4 L, R, T, B; nb(u_vel, u_tx, L, R, T, B); o = vec4(0.5 * (R.y - L.y - T.x + B.x), 0.0, 0.0, 1.0); }`),
+    vort: r.program(V, `${H} uniform sampler2D u_vel; uniform sampler2D u_curl; uniform vec2 u_tx; uniform float u_strength; uniform float u_dt; ${NB}
+      void main(){
+        vec4 L, R, T, B; vec4 C = nb(u_curl, u_tx, L, R, T, B);
+        vec2 f = 0.5 * vec2(abs(T.x) - abs(B.x), abs(R.x) - abs(L.x));
+        f /= length(f) + 1e-4; f *= u_strength * C.x; f.y *= -1.0;
+        vec2 v = texture(u_vel, v_uv).xy + f * u_dt;
+        o = vec4(clamp(v, -900.0, 900.0), 0.0, 1.0);        // hard cap: no energy blow-ups
+      }`),
+    div: r.program(V, `${H} uniform sampler2D u_vel; uniform vec2 u_tx; ${NB}
+      void main(){
+        vec4 Lv, Rv, Tv, Bv; vec2 C = nb(u_vel, u_tx, Lv, Rv, Tv, Bv).xy;
+        float L = Lv.x, R = Rv.x, T = Tv.y, B = Bv.y;
+        if (v_uv.x - u_tx.x < 0.0) L = -C.x; if (v_uv.x + u_tx.x > 1.0) R = -C.x;   // solid walls
+        if (v_uv.y + u_tx.y > 1.0) T = -C.y; if (v_uv.y - u_tx.y < 0.0) B = -C.y;
+        o = vec4(0.5 * (R - L + T - B), 0.0, 0.0, 1.0);
+      }`),
+    scale: r.program(V, `${H} uniform sampler2D u_src; uniform float u_k; void main(){ o = u_k * texture(u_src, v_uv); }`),
+    pres: r.program(V, `${H} uniform sampler2D u_p; uniform sampler2D u_div; uniform vec2 u_tx; ${NB}
+      void main(){ vec4 L, R, T, B; nb(u_p, u_tx, L, R, T, B); o = vec4((L.x + R.x + B.x + T.x - texture(u_div, v_uv).x) * 0.25, 0.0, 0.0, 1.0); }`),
+    grad: r.program(V, `${H} uniform sampler2D u_p; uniform sampler2D u_vel; uniform vec2 u_tx; ${NB}
+      void main(){ vec4 L, R, T, B; nb(u_p, u_tx, L, R, T, B); o = vec4(texture(u_vel, v_uv).xy - 0.5 * vec2(R.x - L.x, T.x - B.x), 0.0, 1.0); }`),   // central-difference gradient, matching the divergence
+    adv: r.program(V, `${H} uniform sampler2D u_vel; uniform sampler2D u_src; uniform vec2 u_vtx; uniform float u_dt; uniform float u_diss;
+      void main(){
+        vec2 mid = v_uv - 0.5 * u_dt * texture(u_vel, v_uv).xy * u_vtx;      // midpoint trace: keeps
+        vec2 c = v_uv - u_dt * texture(u_vel, mid).xy * u_vtx;                // spinning ink from piling up
+        float inside = step(0.0, c.x) * step(c.x, 1.0) * step(0.0, c.y) * step(c.y, 1.0);   // fluid from outside is clean
+        o = inside * texture(u_src, c) / (1.0 + u_diss * u_dt);
+      }`),
+    // ink to the screen, with a little relief lighting from the ink's own gradient
+    display: r.program(V, `${H} uniform sampler2D u_dye; uniform vec2 u_tx; uniform vec2 u_c; uniform float u_zoom; uniform float u_gain; uniform float u_shade; uniform float u_floor;
+      void main(){
+        vec2 uv = u_c + (v_uv - u_c) / u_zoom;
+        vec3 c = texture(u_dye, uv).rgb;
+        float m = max(c.r, max(c.g, c.b));
+        c *= smoothstep(u_floor, u_floor * 3.0 + 1e-4, m);      // thin haze -> black
+        float L = length(texture(u_dye, uv - vec2(u_tx.x, 0.0)).rgb), R = length(texture(u_dye, uv + vec2(u_tx.x, 0.0)).rgb);
+        float T = length(texture(u_dye, uv + vec2(0.0, u_tx.y)).rgb), B = length(texture(u_dye, uv - vec2(0.0, u_tx.y)).rgb);
+        vec3 n = normalize(vec3(R - L, T - B, 0.25));
+        float light = 0.55 + 0.75 * max(dot(n, normalize(vec3(-0.5, 0.7, 1.0))), 0.0);
+        o = vec4(c * mix(1.0, light, u_shade) * u_gain, 1.0);
+      }`),
+  };
+  return r._ink;
+}
+
+class InkTide {
+  constructor(F) {
+    const r = renderer, C = INK, gl = r.gl;
+    if (!r.hdr) throw new Error("Ink Tide needs floating-point render targets, which this browser does not offer.");
+    this.F = F; this.frame = -1; this.rng = makeRng(C.SEED); this.P = inkPrograms(r);
+    const dbl = (w, h) => ({ read: r.target(w, h), write: r.target(w, h), swap() { const t = this.read; this.read = this.write; this.write = t; } });
+    this.vel = dbl(C.SIM_W, C.SIM_H); this.pres = dbl(C.SIM_W, C.SIM_H); this.dye = dbl(C.DYE_W, C.DYE_H);
+    this.div = r.target(C.SIM_W, C.SIM_H); this.curlT = r.target(C.SIM_W, C.SIM_H);
+    this.all = [this.vel.read, this.vel.write, this.pres.read, this.pres.write, this.dye.read, this.dye.write, this.div, this.curlT];
+    gl.clearColor(0, 0, 0, 0);
+    for (const t of this.all) { gl.bindFramebuffer(gl.FRAMEBUFFER, t.fb); gl.clear(gl.COLOR_BUFFER_BIT); }
+    gl.clearColor(0, 0, 0, 1);
+    this.pal = PALETTES[0].map(c => c.slice());
+    this.prevChroma = new Float64Array(12);
+    this.side = 0; this.calm = 0; this.spin = 0;
+  }
+  dispose() { const gl = renderer.gl; for (const t of this.all) { gl.deleteTexture(t.tex); gl.deleteFramebuffer(t.fb); } }
+
+  splat(t, list) {
+    const r = renderer, gl = r.gl, P = this.P.splat;
+    for (let a = 0; a < list.length; a += 24) {
+      const chunk = list.slice(a, a + 24), s = new Float32Array(96), c = new Float32Array(72);
+      chunk.forEach((q, k) => { s.set(q.slice(0, 4), k * 4); c.set(q.slice(4, 7), k * 3); });
+      r.pass(P, t.write, u => {
+        r.bindTex(0, t.read); gl.uniform1i(u.u_src, 0); gl.uniform1f(u.u_aspect, CONFIG.W / CONFIG.H);
+        gl.uniform1i(u.u_n, chunk.length); gl.uniform4fv(u.u_s, s); gl.uniform3fv(u.u_c, c);
+      });
+      t.swap();
+    }
+  }
+
+  step(i) {
+    const C = INK, F = this.F, rng = this.rng;
+    this.frame = i;
+    const calm = clamp(1 - F.secEnergy[F.section[i]] / 0.6, 0, 1);    // 1 in breakdowns
+    this.calm = calm;
+    const target = PALETTES[C.PALETTE_LOCK >= 0 ? C.PALETTE_LOCK : F.section[i] % PALETTES.length];
+    const kp = 1 - Math.exp(-1.2 * DT);
+    for (let a = 0; a < 4; a++) for (let c = 0; c < 3; c++) this.pal[a][c] += (target[a][c] - this.pal[a][c]) * kp;
+    const [, cold, hot, accent] = this.pal;
+    const uv = (x, y) => [x / CONFIG.W, 1 - y / CONFIG.H];          // world px (y down) -> texture uv (y up)
+    const [cx, cy] = CONFIG.CENTER, core = uv(cx, cy), force = 1 - 0.5 * calm;
+    const ink = (col, k) => col.map(v => v * k);
+    const vs = [], ds = [];   // splats: [u, v, radius, mode, x, y, z]
+    // All forces are vortex pairs: a counter-rotating pair drives a jet between them (direction ang,
+    // screen space, y up) without compressing the fluid, so no ink is created out of nothing.
+    const A = CONFIG.W / CONFIG.H;
+    const jet = (u, w, ang, str, rad) => {
+      const sep = 0.9 * Math.sqrt(rad), px = -Math.sin(ang), py = Math.cos(ang);
+      vs.push([u + px * sep / A, w + py * sep, rad, 2, str, 0, 0]);
+      vs.push([u - px * sep / A, w - py * sep, rad, 2, -str, 0, 0]);
+    };
+
+    // sub + bass: a plume of ink rising from the bottom
+    const bass = 0.6 * F.sub[i] + 0.4 * F.bass[i];
+    // (continuous forces are scaled by DT; kicks, snares and hats are one-off impulses)
+    jet(0.5, 0.07, Math.PI / 2, C.BASS_PLUME * bass * bass * force * DT, 0.004);
+    ds.push([0.5, 0.03, 0.003, 0, ...ink(cold, C.BASS_INK * bass)]);
+    // low mids: spin around the core
+    vs.push([core[0], core[1], 0.06, 2, C.SWIRL * (0.2 + F.lowmid[i]) * force * DT, 0, 0]);
+    // kick: a ring of jets bursting out of the core, each carrying hot ink. A pure radial push would be
+    // cancelled by incompressibility; jets curl up into a flower of mushroom-shaped vortex pairs instead.
+    if (F.kickHits.has(i)) {
+      const s = 0.4 + 0.6 * F.kickHits.get(i), n = C.KICK_JETS, a0 = rng() * 2 * Math.PI;
+      for (let j = 0; j < n; j++) {
+        const a = a0 + j * 2 * Math.PI / n, [u, w] = uv(cx + Math.cos(a) * 90, cy + Math.sin(a) * 90);
+        jet(u, w, -a, C.KICK_PUSH * s, 0.0012);
+        ds.push([u, w, 0.0006, 0, ...ink(hot, C.KICK_INK * s)]);
+      }
+    }
+    // snare: a jet from alternating sides; it rolls up into a mushroom-shaped vortex pair
+    if (F.snareHits.has(i) && F.snare[i] > 0.25) {
+      const s = 0.5 + 0.5 * F.snareHits.get(i), side = this.side++ % 2 === 0 ? 1 : -1;
+      const y = 0.25 + 0.5 * rng(), x = side > 0 ? 0.07 : 0.93, ang = rng.normal(0, 0.35);
+      jet(x, y, side > 0 ? ang : Math.PI - ang, C.SNARE_JET * s, 0.0025);
+      ds.push([x, y, 0.002, 0, ...ink(accent, C.SNARE_INK * s)]);
+    }
+    // 12 note nozzles on a slowly turning ring, ordered round the circle of fifths
+    const ch = F.chroma.subarray(i * 12, i * 12 + 12), harm = F.harmonic[i] * (0.4 + 0.6 * F.tonal[i]);
+    this.spin += (0.05 + 0.25 * F.energySlow[i]) * DT;
+    for (let k = 0; k < 12; k++) {
+      const v = ch[k] * ch[k] * harm, rise = Math.max(0, ch[k] - this.prevChroma[k]);
+      this.prevChroma[k] = ch[k] * 0.7 + this.prevChroma[k] * 0.3;
+      if (v < 0.03 && rise < 0.05) continue;
+      const a = ((k * 7) % 12) / 12 * 2 * Math.PI - Math.PI / 2 + this.spin;
+      const [u, w] = uv(cx + Math.cos(a) * C.RING_RADIUS, cy + Math.sin(a) * C.RING_RADIUS);
+      // squirt along the ring with a little outward drift, so each note draws a coloured streamer
+      const fx = -Math.sin(a) + 0.35 * Math.cos(a), fy = -(Math.cos(a) + 0.35 * Math.sin(a));
+      const flow = C.NOTE_FLOW * DT * (v + 2 * rise);
+      jet(u, w, Math.atan2(fy, fx), flow, 0.0012);
+      ds.push([u, w, 0.0008, 0, ...ink(STRING_COLORS[k], C.NOTE_INK * (v + 1.5 * rise))]);
+    }
+    // hats: tiny jets that stir the edges
+    if (F.hatHits.has(i)) {
+      const s = F.hatHits.get(i) * (0.3 + F.air[i]);
+      for (let j = 0; j < C.HAT_JETS; j++) {
+        const a = rng() * 2 * Math.PI, rr = 150 + rng() * 650, b = rng() * 2 * Math.PI;
+        const [u, w] = uv(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+        jet(u, w, b, C.HAT_JET * s, 0.0004);
+        ds.push([u, w, 0.0003, 0, ...ink(accent.map(x => 0.5 + 0.5 * x), C.HAT_INK * s)]);
+      }
+    }
+    renderer.gl.disable(renderer.gl.BLEND);
+    this.splat(this.vel, vs); this.splat(this.dye, ds);
+    const vort = C.VORTICITY + C.VORTICITY_HATS * (0.6 * F.air[i] + 0.9 * F.hat[i]);
+    const inkFade = C.INK_FADE + (C.INK_FADE_CALM - C.INK_FADE) * calm;
+    for (let s = 0; s < C.SUBSTEPS; s++) this.simulate(DT / C.SUBSTEPS, vort, inkFade);
+  }
+
+  simulate(dt, vort, inkFade) {
+    const r = renderer, gl = r.gl, P = this.P, C = INK, tx = [1 / C.SIM_W, 1 / C.SIM_H];
+    const tex = (u, name, unit, t) => { r.bindTex(unit, t); gl.uniform1i(u[name], unit); };
+    r.pass(P.curl, this.curlT, u => { tex(u, "u_vel", 0, this.vel.read); gl.uniform2fv(u.u_tx, tx); });
+    r.pass(P.vort, this.vel.write, u => { tex(u, "u_vel", 0, this.vel.read); tex(u, "u_curl", 1, this.curlT); gl.uniform2fv(u.u_tx, tx); gl.uniform1f(u.u_strength, vort); gl.uniform1f(u.u_dt, dt); });
+    this.vel.swap();
+    r.pass(P.div, this.div, u => { tex(u, "u_vel", 0, this.vel.read); gl.uniform2fv(u.u_tx, tx); });
+    r.pass(P.scale, this.pres.write, u => { tex(u, "u_src", 0, this.pres.read); gl.uniform1f(u.u_k, 0.8); });
+    this.pres.swap();
+    for (let k = 0; k < C.PRESSURE_ITERS; k++) {
+      r.pass(P.pres, this.pres.write, u => { tex(u, "u_p", 0, this.pres.read); tex(u, "u_div", 1, this.div); gl.uniform2fv(u.u_tx, tx); });
+      this.pres.swap();
+    }
+    r.pass(P.grad, this.vel.write, u => { tex(u, "u_p", 0, this.pres.read); tex(u, "u_vel", 1, this.vel.read); gl.uniform2fv(u.u_tx, tx); });
+    this.vel.swap();
+    r.pass(P.adv, this.vel.write, u => { tex(u, "u_vel", 0, this.vel.read); tex(u, "u_src", 1, this.vel.read); gl.uniform2fv(u.u_vtx, tx); gl.uniform1f(u.u_dt, dt); gl.uniform1f(u.u_diss, C.VISCOSITY); });
+    this.vel.swap();
+    r.pass(P.adv, this.dye.write, u => { tex(u, "u_vel", 0, this.vel.read); tex(u, "u_src", 1, this.dye.read); gl.uniform2fv(u.u_vtx, tx); gl.uniform1f(u.u_dt, dt); gl.uniform1f(u.u_diss, inkFade); });
+    this.dye.swap();
+  }
+
+  draw() {
+    const r = renderer, gl = r.gl, C = INK, F = this.F, i = this.frame;
+    gl.disable(gl.BLEND);
+    const zoom = 1 + 0.03 * F.kick[i] + 0.03 * F.energySlow[i];
+    r.pass(this.P.display, r.acc, u => {
+      r.bindTex(0, this.dye.read); gl.uniform1i(u.u_dye, 0);
+      gl.uniform2f(u.u_tx, 1 / C.DYE_W, 1 / C.DYE_H); gl.uniform2f(u.u_c, CONFIG.CENTER[0] / CONFIG.W, 1 - CONFIG.CENTER[1] / CONFIG.H);
+      gl.uniform1f(u.u_zoom, zoom); gl.uniform1f(u.u_gain, C.INK_GAIN * (0.75 + 0.5 * F.rms[i])); gl.uniform1f(u.u_shade, C.SHADE);
+      gl.uniform1f(u.u_floor, C.INK_FLOOR);
+    });
+    r.compose({ F, frame: i, bg: this.pal[0], glow: C.GLOW, exposure: C.EXPOSURE, fadeIn: C.FADE_IN, fadeOut: C.FADE_OUT });
+  }
+  stats() { return [["fluid grid", INK.SIM_W + "×" + INK.SIM_H], ["ink", INK.DYE_W + "×" + INK.DYE_H]]; }
+}
+
+// =========================== VISUALISER MENU ===============================
+// Every visualiser shares the analysis, playback, recording and glow pass, and brings its own
+// physics, drawing, settings and "how the music drives it" table.
+const VISUALISERS = [
+  {
+    id: "gravity-harp", name: "Gravity Harp", status: "Kept",
+    blurb: "Particles orbit a black hole; 12 strings play the notes",
+    config: CONFIG, sliders: SLIDERS, particles: true,
+    hints: { sub: "well", kick: "blast", snare: "rings", lowmid: "spin", hat: "sparks", centroid: "warmth" },
+    mapping: [
+      ["Sub + bass", "Mass of the central gravity well; the photon ring swells"],
+      ["Kick", "Radial pressure blast from the core, plus a small camera punch-in"],
+      ["Snare", "Expanding shockwave rings that shove particles"],
+      ["Low mids", "Disk spin"],
+      ["Hats + air", "Curl-noise turbulence and sparks thrown off the strings"],
+      ["12 pitch classes", "12 vibrating strings (wave equation), coloured round the circle of fifths"],
+      ["Brightness", "Warmth of the particle colours"],
+      ["Song sections", "Palette changes; quiet sections loosen gravity into a halo"],
+    ],
+    create: F => new Scene(F, CONFIG.N_PARTICLES),
+  },
+  {
+    id: "ink-tide", name: "Ink Tide", status: "On trial",
+    blurb: "Coloured ink swirling in a real fluid simulation",
+    config: INK, sliders: INK_SLIDERS, particles: false,
+    hints: { sub: "plume", kick: "blast", snare: "jets", lowmid: "swirl", hat: "curl", centroid: "–" },
+    mapping: [
+      ["Sub + bass", "A plume of ink rising from the bottom"],
+      ["Kick", "Pressure blast from the core with a flash of hot ink, plus a small camera punch-in"],
+      ["Snare", "Jets fired from alternating sides; each rolls up into a mushroom-shaped vortex pair"],
+      ["Low mids", "Spin around the core"],
+      ["Hats + air", "Curly turbulence (vorticity) and tiny jets at the edges"],
+      ["12 pitch classes", "12 ink nozzles on a turning ring, coloured round the circle of fifths; new notes squirt harder"],
+      ["Loudness", "Ink brightness"],
+      ["Song sections", "Palette changes; quiet sections fade the ink slowly, leaving long smoky trails"],
+    ],
+    create: F => new InkTide(F),
+  },
+];
+VISUALISERS.forEach(v => { v.defaults = JSON.parse(JSON.stringify(v.config)); });
 
 // =========================== DEMO TRACK ====================================
 // 40 s, 120 bpm: intro (pads + hats), drop, breakdown (pads only), drop.
@@ -1042,7 +1345,8 @@ const canvas = $("gl");
 const app = {
   F: null, buffer: null, scene: null, name: "demo",
   ctx: null, src: null, playing: false, startAt: 0, offset: 0,
-  recording: null, recBlob: null, downloads: null, scale: 0.5,
+  recording: null, recBlob: null, downloads: null, scale: 0.5, sceneKey: null,
+  vis: VISUALISERS.find(v => "#" + v.id === location.hash) || VISUALISERS[0],
   fpsT: performance.now(), fpsN: 0, fps: 0, busy: false,
 };
 let renderer;
@@ -1062,39 +1366,75 @@ function setEnabled(on) { for (const id of ["playBtn", "restartBtn", "recBtn", "
 // ----- settings UI -----
 function buildSettings() {
   const box = $("sliders"); box.textContent = "";
-  for (const [key, label, min, max, step] of SLIDERS) {
+  const V = app.vis, CFG = V.config;
+  for (const [key, label, min, max, step] of V.sliders) {
     const row = document.createElement("div"); row.className = "ctl";
     const id = "s_" + key;
     row.innerHTML = `<label for="${id}"></label><input type="range" id="${id}" min="${min}" max="${max}" step="${step}"><output for="${id}"></output>`;
     row.querySelector("label").textContent = label;
     const inp = row.querySelector("input"), out = row.querySelector("output");
-    const show = () => { out.textContent = (+CONFIG[key]).toFixed(step < 0.1 ? 2 : step < 1 ? 1 : 0); };
-    inp.value = CONFIG[key]; show();
-    inp.addEventListener("input", () => { CONFIG[key] = +inp.value; show(); if (!app.playing) redrawStill(); });
+    const show = () => { out.textContent = (+CFG[key]).toFixed(step < 0.1 ? 2 : step < 1 ? 1 : 0); };
+    inp.value = CFG[key]; show();
+    inp.addEventListener("input", () => { CFG[key] = +inp.value; show(); if (!app.playing) redrawStill(); });
     box.appendChild(row);
   }
   const sel = $("palSel"); sel.textContent = "";
   const o0 = document.createElement("option"); o0.value = "-1"; o0.textContent = "Follow song sections"; sel.appendChild(o0);
   PALETTE_NAMES.forEach((name, k) => { const o = document.createElement("option"); o.value = k; o.textContent = name; sel.appendChild(o); });
-  sel.value = String(CONFIG.PALETTE_LOCK);
+  sel.value = String(CFG.PALETTE_LOCK);
+  $("partWrap").hidden = !V.particles;
+  $("applyNote").textContent = (V.particles ? "Particle count and render size apply" : "Render size applies") + " on the next play or record.";
+  $("partSel").value = String(CONFIG.N_PARTICLES);
+  const tb = $("mapTable"); tb.textContent = "";
+  for (const [a, b] of V.mapping) { const tr = tb.insertRow(); tr.insertCell().textContent = a; tr.insertCell().textContent = b; }
+  if (typeof meterHints !== "undefined") METERS.forEach(([k], j) => { meterHints[j].textContent = V.hints[k] || ""; });
 }
-$("palSel").addEventListener("change", e => { CONFIG.PALETTE_LOCK = +e.target.value; });
+$("palSel").addEventListener("change", e => { app.vis.config.PALETTE_LOCK = +e.target.value; });
 $("partSel").addEventListener("change", e => { CONFIG.N_PARTICLES = +e.target.value; });
 $("resSel").addEventListener("change", e => { app.scale = +e.target.value; });
 $("resetBtn").addEventListener("click", () => {
-  Object.assign(CONFIG, JSON.parse(JSON.stringify(DEFAULTS)));
-  $("partSel").value = String(CONFIG.N_PARTICLES); buildSettings(); if (!app.playing) redrawStill();
+  Object.assign(app.vis.config, JSON.parse(JSON.stringify(app.vis.defaults)));
+  buildSettings(); if (!app.playing) redrawStill();
 });
-buildSettings();
+
+// ----- visualiser menu -----
+function buildMenu() {
+  const nav = $("visMenu"); nav.textContent = "";
+  VISUALISERS.forEach((v, k) => {
+    const b = document.createElement("button"); b.className = "vis-card"; b.dataset.id = v.id;
+    b.innerHTML = `<span class="num"></span><span class="nm"></span><span class="st"></span><span class="bl"></span>`;
+    b.querySelector(".num").textContent = "#" + (k + 1); b.querySelector(".nm").textContent = v.name;
+    const st = b.querySelector(".st"); st.textContent = v.status; st.classList.toggle("kept", v.status === "Kept");
+    b.querySelector(".bl").textContent = v.blurb; b.title = v.blurb;
+    b.addEventListener("click", () => selectVis(v.id));
+    nav.appendChild(b);
+  });
+}
+function markMenu() {
+  for (const b of $("visMenu").children) b.setAttribute("aria-pressed", String(b.dataset.id === app.vis.id));
+  $("visName").textContent = app.vis.name;
+}
+async function selectVis(id) {
+  const v = VISUALISERS.find(x => x.id === id);
+  if (!v || app.recording || app.busy) { markMenu(); return; }
+  if (location.hash !== "#" + v.id) { try { location.hash = v.id; } catch (_) {} }
+  if (v === app.vis) return;
+  app.vis = v; markMenu(); buildSettings();
+  if (app.F) { stopPlayback(); app.busy = true; setEnabled(false); try { await buildPoster(); } finally { app.busy = false; setEnabled(true); } }
+}
+window.addEventListener("hashchange", () => { const id = location.hash.slice(1); if (id && id !== app.vis.id) selectVis(id); });
+buildMenu(); markMenu();
 
 // ----- meters -----
 const METERS = [["sub", "SUB", "well"], ["kick", "KICK", "blast"], ["snare", "SNARE", "rings"], ["lowmid", "LOW MID", "spin"], ["hat", "HATS", "sparks"], ["centroid", "BRIGHT", "warmth"]];
+const meterHints = [];
 const meterEls = METERS.map(([k, label, what]) => {
   const m = document.createElement("div"); m.className = "meter";
   m.innerHTML = `<div class="well"><i></i></div><span></span><small></small>`;
-  m.querySelector("span").textContent = label; m.querySelector("small").textContent = what;
+  m.querySelector("span").textContent = label; meterHints.push(m.querySelector("small"));
   $("meters").appendChild(m); return m.querySelector("i");
 });
+buildSettings();
 const chromaEls = NOTE_NAMES.map((nm, k) => {
   const d = document.createElement("i"); const c = STRING_COLORS[k];
   d.style.background = `rgb(${c.map(v => Math.round(v * 255)).join(",")})`; $("chroma").appendChild(d);
@@ -1136,17 +1476,23 @@ async function buildPoster() {
   let best = Math.min(lim, Math.round(10 * FPS)), bv = -1;
   for (let i = Math.round(4 * FPS); i <= lim; i++) { const v = F.energySlow[i] + 0.3 * F.kick[i]; if (v > bv) { bv = v; best = i; } }
   app.posterFrame = best;
-  app.scene = new Scene(F, CONFIG.N_PARTICLES);
-  renderer.resize(app.scale);
+  try { newScene(); }
+  catch (e) { showOverlay(app.vis.name + " cannot run here", String(e.message || e), null); return; }
   for (let i = 0; i <= best; i++) {
     app.scene.step(i);
-    if (best - i < 12) renderer.draw(app.scene);
+    if (best - i < 12) app.scene.draw();
     if (i % 20 === 0) { showOverlay("Building a preview", `Simulating to ${fmtTime(best / FPS)}, a busy moment`, 0.7 + 0.3 * i / best); await tick(); }
   }
   app.atPoster = true;
   hideOverlay(); updateMeters(best); setProgress(best / FPS);
 }
-function redrawStill() { if (app.scene && app.scene.frame >= 0 && !app.busy) renderer.draw(app.scene); }
+function redrawStill() { if (app.scene && app.scene.frame >= 0 && !app.busy) app.scene.draw(); }
+const sceneKey = () => [app.vis.id, app.scale, app.vis.particles ? CONFIG.N_PARTICLES : 0].join("|");
+function newScene() {
+  if (app.scene) app.scene.dispose();
+  app.scene = null; renderer.resize(app.scale);
+  app.scene = app.vis.create(app.F); app.sceneKey = sceneKey();
+}
 
 $("file").addEventListener("change", async e => {
   const f = e.target.files[0]; if (!f) return;
@@ -1187,8 +1533,8 @@ function ensureCtx() {
 }
 function startPlayback(fromFrame, extraDest) {
   const ctx = ensureCtx();
-  if (fromFrame === 0 || !app.scene || app.scene.N !== CONFIG.N_PARTICLES || renderer.scale !== app.scale || app.scene.frame < 0 || app.atPoster) {
-    app.scene = new Scene(app.F, CONFIG.N_PARTICLES); renderer.resize(app.scale); fromFrame = 0; app.atPoster = false;
+  if (fromFrame === 0 || !app.scene || app.sceneKey !== sceneKey() || app.scene.frame < 0 || app.atPoster) {
+    newScene(); fromFrame = 0; app.atPoster = false;
   }
   const src = ctx.createBufferSource(); src.buffer = app.buffer; src.connect(ctx.destination);
   if (extraDest) src.connect(extraDest);
@@ -1218,7 +1564,7 @@ function loop() {
   // physics replays every frame in order (deterministic); drawing happens once per screen refresh
   while (sc.frame < target && performance.now() - t0 < 40) { sc.step(sc.frame + 1); stepped = true; }
   if (stepped) {
-    renderer.draw(sc); updateMeters(sc.frame); setProgress(sc.frame / FPS);
+    sc.draw(); updateMeters(sc.frame); setProgress(sc.frame / FPS);
     app.fpsN++; const now = performance.now();
     if (now - app.fpsT > 1000) { app.fps = app.fpsN * 1000 / (now - app.fpsT); app.fpsN = 0; app.fpsT = now; showPerf(target - sc.frame); }
     if (app.recording) $("recTime").textContent = fmtTime(sc.frame / FPS) + " / " + fmtTime(F.duration);
@@ -1234,7 +1580,7 @@ function showPerf(behind) {
   const p = $("perf"); p.innerHTML = "";
   const add = (k, v) => { const s = document.createElement("span"); s.innerHTML = `${k} <b></b>`; s.querySelector("b").textContent = v; p.appendChild(s); };
   add("drawn", app.fps.toFixed(0) + " fps"); add("render", canvas.width + "×" + canvas.height);
-  add("particles", app.scene.N.toLocaleString()); add("points", (renderer.lastDots || 0).toLocaleString());
+  for (const [k, v] of app.scene.stats()) add(k, v);
   if (!renderer.hdr) add("buffer", "8-bit (no float targets)");
   if (behind > 2) add("physics behind by", behind + " frames");
 }
@@ -1261,7 +1607,7 @@ $("recBtn").addEventListener("click", () => {
   }
   stopPlayback(); $("saveOut").hidden = true; app.recBlob = null;
   const ctx = ensureCtx(), dest = ctx.createMediaStreamDestination();
-  app.scene = null; startPlayback(0, dest);      // fresh scene at the chosen render size
+  app.sceneKey = null; startPlayback(0, dest);   // fresh scene at the chosen render size
   const stream = canvas.captureStream(FPS);
   dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
   const mime = pickMime(), chunks = [];
@@ -1292,14 +1638,14 @@ async function offerFile(blob, filename) {
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000);
   return "Saved " + filename;
 }
-const safeName = () => "gravity-harp-" + app.name.replace(/[^\w-]+/g, "-").slice(0, 60);
+const safeName = () => app.vis.id + "-" + app.name.replace(/[^\w-]+/g, "-").slice(0, 60);
 $("saveVidBtn").addEventListener("click", async () => {
   if (!app.recBlob) return;
   $("recNote").textContent = await offerFile(app.recBlob, `${safeName()}.${app.recExt}`);
 });
 $("stillBtn").addEventListener("click", () => {
   if (!app.scene) return;
-  if (!app.playing) renderer.draw(app.scene);
+  if (!app.playing) app.scene.draw();
   canvas.toBlob(async b => { if (b) $("recNote").textContent = await offerFile(b, `${safeName()}-${fmtTime(app.scene.frame / FPS).replace(":", "m")}s.png`); }, "image/png");
 });
 

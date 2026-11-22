@@ -12,6 +12,17 @@ See `CLAUDE.md` for the full brief.
 
 ## Web POC
 
+The page has a menu of visualisers. Each one shares the audio analysis, playback, recording and
+glow pass, and brings its own physics, settings and palette (see `VISUALISERS` in `web/index.html`).
+A link ending in `#ink-tide` (or any visualiser id) opens that visualiser directly.
+
+| # | Visualiser | Status | Physics |
+|---|---|---|---|
+| 1 | Gravity Harp (`gravity-harp`) | Kept | Particles under gravity + viscosity, 1-D wave-equation strings, shockwaves |
+| 2 | Ink Tide (`ink-tide`) | On trial | 2-D incompressible Navier–Stokes (stable fluids on the GPU); every force is a vortex pair |
+
+To remove a visualiser, delete its entry from `VISUALISERS` and its class/config block.
+
 Open `web/index.html` in Chrome, Safari or Firefox (desktop or phone). It starts with the demo
 track `web/Mix.mp3` (falls back to a built-in synth beat if the file cannot be fetched, e.g. when
 the page is opened straight from disk); use **Load MP3 or WAV** for any other track.
