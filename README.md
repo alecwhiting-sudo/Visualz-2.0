@@ -19,7 +19,8 @@ A link ending in `#ink-tide` (or any visualiser id) opens that visualiser direct
 | # | Visualiser | Status | Physics |
 |---|---|---|---|
 | 1 | Gravity Harp (`gravity-harp`) | Kept | Particles under gravity + viscosity, 1-D wave-equation strings, shockwaves |
-| 2 | Ink Tide (`ink-tide`) | On trial | 2-D incompressible Navier–Stokes (stable fluids on the GPU); every force is a vortex pair |
+| 2 | Ink Tide (`ink-tide`) | Kept | 2-D incompressible Navier–Stokes (stable fluids on the GPU); every force is a vortex pair |
+| 3 | Ripple Tank (`ripple-tank`) | On trial | 2-D damped wave equation; 12 note sources at pitch-scaled frequencies interfere, a refracting lens focuses caustics |
 
 To remove a visualiser, delete its entry from `VISUALISERS` and its class/config block.
 

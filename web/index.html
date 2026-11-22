@@ -32,7 +32,7 @@ body {
 .app { display: grid; gap: 20px; max-width: 1560px; margin: 0 auto; grid-template-columns: minmax(0, 1fr); --stage-w: min(100%, calc(82vh * 9 / 16)); }
 .vis-menu { display: flex; gap: 8px; overflow-x: auto; grid-column: 1 / -1; min-width: 0; padding-bottom: 2px; }
 .vis-card {
-  flex: 1 0 210px; max-width: 340px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 1px 10px;
+  flex: 1 0 180px; max-width: 340px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 1px 10px;
   align-items: center; text-align: left; padding: 8px 12px; min-height: 0; border-radius: 12px; background: var(--rack);
 }
 .vis-card[aria-pressed="true"] { border-color: var(--photon); background: var(--rack-2); }
@@ -1258,6 +1258,188 @@ class InkTide {
   stats() { return [["fluid grid", INK.SIM_W + "×" + INK.SIM_H], ["ink", INK.DYE_W + "×" + INK.DYE_H]]; }
 }
 
+// =========================== VISUALISER 3: RIPPLE TANK =====================
+// A sheet of water: the 2-D damped wave equation on the GPU. Notes are vibrating sources whose
+// rings interfere; drums drop stones; a "lens" of slower water in the middle bends the waves.
+const RIPPLE = {
+  SEED: 5,
+  SIM_W: 270, SIM_H: 480,          // water grid (square cells, 9:16)
+  SUBSTEPS: 6,
+  WAVE_SPEED: 0.6,                 // cells per substep (must stay below 0.7 for stability)
+  DAMPING: 0.010,                  // per substep: how fast ripples die in busy sections
+  DAMPING_CALM: 0.004,             // ... and in quiet sections: ripples linger
+  EDGE_ABSORB: 0.25,               // soak up waves at the frame edges so they don't bounce forever
+  NOTE_HZ: 2.2,                    // ripple frequency of C; each semitone up is 2^(1/12) faster
+  NOTE_AMP: 0.05, RING_RADIUS: 380,
+  BASS_AMP: 0.0015, BASS_HZ: 1.0,  // sub + bass: slow swell from the centre (slow forcing builds up a lot,
+                                   // since the water's response grows as 1 / frequency^2: keep this small)
+  KICK_DROP: 2.5, SNARE_DROP: 1.5, // drums: stones dropped on the surface
+  RAIN: 4, RAIN_DROP: 0.5,         // hats + air: raindrops
+  LENS: 0.45,                      // low mids: how much slower the water is in the middle
+  SLOPE: 3.0, CAUSTICS: 1.8, GLINT: 1.0, NOTE_TINT: 0.6,
+  GLOW: 0.5, EXPOSURE: 1.5, FADE_IN: 1.5, FADE_OUT: 3.0,
+  PALETTE_LOCK: -1,
+};
+const RIPPLE_SLIDERS = [
+  ["GLOW", "Glow", 0, 2.5, 0.05],
+  ["EXPOSURE", "Exposure", 0.6, 3, 0.05],
+  ["SLOPE", "Ripple contrast", 0.5, 8, 0.1],
+  ["DAMPING", "Damping", 0.002, 0.04, 0.001],
+  ["KICK_DROP", "Kick drop", 0, 8, 0.1],
+  ["SNARE_DROP", "Snare drops", 0, 6, 0.1],
+  ["RAIN", "Raindrops", 0, 12, 1],
+  ["LENS", "Lens", 0, 0.7, 0.01],
+];
+
+function ripplePrograms(r) {
+  if (r._ripple) return r._ripple;
+  const V = r.FS_VERT, H = `#version 300 es
+    precision highp float; precision highp sampler2D; in vec2 v_uv; out vec4 o;`;
+  r._ripple = {
+    // one leapfrog step of the damped wave equation; state = (height now, height before)
+    step: r.program(V, `${H}
+      uniform sampler2D u_state; uniform vec2 u_tx; uniform float u_aspect; uniform float u_c; uniform float u_damp;
+      uniform float u_edge; uniform float u_lens; uniform vec2 u_core; uniform vec4 u_src[13];
+      void main(){
+        vec4 C = texture(u_state, v_uv);
+        float L = texture(u_state, v_uv - vec2(u_tx.x, 0.0)).x, R = texture(u_state, v_uv + vec2(u_tx.x, 0.0)).x;
+        float T = texture(u_state, v_uv + vec2(0.0, u_tx.y)).x, B = texture(u_state, v_uv - vec2(0.0, u_tx.y)).x;
+        float lap = L + R + T + B - 4.0 * C.x;
+        vec2 p = v_uv - u_core; p.x *= u_aspect;
+        float c = u_c * (1.0 - u_lens * exp(-dot(p, p) / 0.02));          // slower water in the lens
+        float d = min(min(v_uv.x, 1.0 - v_uv.x) * u_aspect, min(v_uv.y, 1.0 - v_uv.y));
+        float damp = u_damp + u_edge * (1.0 - smoothstep(0.0, 0.06, d));    // absorbing border
+        float h = C.x + (C.x - C.y) * (1.0 - damp) + c * c * lap - 0.0005 * C.x;   // gentle pull back to level
+        for (int k = 0; k < 13; k++) { vec2 q = v_uv - u_src[k].xy; q.x *= u_aspect; h += u_src[k].z * exp(-dot(q, q) / u_src[k].w); }
+        o = vec4(clamp(h, -40.0, 40.0), C.x, 0.0, 1.0);
+      }`),
+    // light the surface: slope shading, caustics where the surface focuses light, sun glints
+    display: r.program(V, `${H}
+      uniform sampler2D u_state; uniform vec2 u_tx; uniform vec2 u_c; uniform float u_zoom; uniform float u_aspect;
+      uniform float u_slope; uniform float u_caus; uniform float u_glint; uniform float u_tint;
+      uniform vec3 u_cold; uniform vec3 u_hot; uniform vec3 u_accent; uniform vec4 u_em[12]; uniform vec3 u_emc[12];
+      void main(){
+        vec2 uv = u_c + (v_uv - u_c) / u_zoom;
+        float h = texture(u_state, uv).x;
+        float L = texture(u_state, uv - vec2(u_tx.x, 0.0)).x, R = texture(u_state, uv + vec2(u_tx.x, 0.0)).x;
+        float T = texture(u_state, uv + vec2(0.0, u_tx.y)).x, B = texture(u_state, uv - vec2(0.0, u_tx.y)).x;
+        vec2 g = 0.5 * vec2(R - L, T - B) * u_slope;
+        float caus = max(-(L + R + T + B - 4.0 * h) * u_slope, 0.0);
+        float slope = length(g);
+        vec3 n = normalize(vec3(-g, 1.0)), hv = normalize(normalize(vec3(-0.4, 0.6, 1.0)) + vec3(0.0, 0.0, 1.0));
+        float spec = pow(max(dot(n, hv), 0.0), 80.0);
+        vec3 water = mix(u_cold, u_hot, clamp(slope * 0.8, 0.0, 1.0));
+        vec3 tint = vec3(0.0), glow = vec3(0.0); float ws = 0.2;
+        for (int k = 0; k < 12; k++) {
+          vec2 q = uv - u_em[k].xy; q.x *= u_aspect; float d2 = dot(q, q);
+          float w = u_em[k].z * exp(-d2 / 0.03); tint += u_emc[k] * w; ws += w;
+          glow += u_emc[k] * u_em[k].z * exp(-d2 / 0.00012) * 0.8;          // the vibrating source itself
+        }
+        vec3 col = mix(water, tint / ws, u_tint * clamp(ws - 0.2, 0.0, 1.0));
+        o = vec4(col * (u_caus * caus + 0.35 * slope) + u_accent * spec * u_glint + glow, 1.0);
+      }`),
+  };
+  return r._ripple;
+}
+
+class RippleTank {
+  constructor(F) {
+    const r = renderer, C = RIPPLE, gl = r.gl;
+    if (!r.hdr) throw new Error("Ripple Tank needs floating-point render targets, which this browser does not offer.");
+    this.F = F; this.frame = -1; this.rng = makeRng(C.SEED); this.P = ripplePrograms(r); this.splatP = inkPrograms(r).splat;
+    this.state = { read: r.target(C.SIM_W, C.SIM_H), write: r.target(C.SIM_W, C.SIM_H), swap() { const t = this.read; this.read = this.write; this.write = t; } };
+    gl.clearColor(0, 0, 0, 0);
+    for (const t of [this.state.read, this.state.write]) { gl.bindFramebuffer(gl.FRAMEBUFFER, t.fb); gl.clear(gl.COLOR_BUFFER_BIT); }
+    gl.clearColor(0, 0, 0, 1);
+    this.pal = PALETTES[0].map(c => c.slice());
+    this.amp = new Float64Array(12); this.side = 0; this.spin = 0; this.calm = 0;
+    this.em = new Float32Array(48); this.emc = new Float32Array(36);
+    for (let k = 0; k < 12; k++) this.emc.set(STRING_COLORS[k], k * 3);
+  }
+  dispose() { const gl = renderer.gl; for (const t of [this.state.read, this.state.write]) { gl.deleteTexture(t.tex); gl.deleteFramebuffer(t.fb); } }
+
+  step(i) {
+    const C = RIPPLE, F = this.F, rng = this.rng, r = renderer, gl = r.gl;
+    this.frame = i;
+    const calm = clamp(1 - F.secEnergy[F.section[i]] / 0.6, 0, 1); this.calm = calm;
+    const target = PALETTES[C.PALETTE_LOCK >= 0 ? C.PALETTE_LOCK : F.section[i] % PALETTES.length];
+    const kp = 1 - Math.exp(-1.2 * DT);
+    for (let a = 0; a < 4; a++) for (let c = 0; c < 3; c++) this.pal[a][c] += (target[a][c] - this.pal[a][c]) * kp;
+    const A = CONFIG.W / CONFIG.H, [cx, cy] = CONFIG.CENTER, uv = (x, y) => [x / CONFIG.W, 1 - y / CONFIG.H], core = uv(cx, cy);
+
+    // stones: kick in the middle, snares either side, raindrops on hats. (a, a) = displacement at rest.
+    const drops = [];
+    if (F.kickHits.has(i)) { const s = (0.4 + 0.6 * F.kickHits.get(i)) * C.KICK_DROP; drops.push([core[0], core[1], 0.0015, 0, -s, -s, 0]); }
+    if (F.snareHits.has(i) && F.snare[i] > 0.25) {
+      const s = (0.5 + 0.5 * F.snareHits.get(i)) * C.SNARE_DROP, side = this.side++ % 2 === 0 ? 1 : -1;
+      const a = side * 1.2 + rng.normal(0, 0.3) - Math.PI / 2, off = 200 + 160 * rng();
+      const [u, w] = uv(cx + Math.cos(a) * off, cy + Math.sin(a) * off);
+      drops.push([u, w, 0.0005, 0, -s, -s, 0]);
+    }
+    if (F.hatHits.has(i)) {
+      const n = Math.round(C.RAIN * F.hatHits.get(i) * (0.3 + F.air[i]) * 2);
+      for (let j = 0; j < n; j++) drops.push([0.05 + 0.9 * rng(), 0.05 + 0.9 * rng(), 0.00008, 0, -C.RAIN_DROP, -C.RAIN_DROP, 0]);
+    }
+    if (drops.length) {
+      for (let a = 0; a < drops.length; a += 24) {
+        const chunk = drops.slice(a, a + 24), s = new Float32Array(96), c = new Float32Array(72);
+        chunk.forEach((q, k) => { s.set(q.slice(0, 4), k * 4); c.set(q.slice(4, 7), k * 3); });
+        gl.disable(gl.BLEND);
+        r.pass(this.splatP, this.state.write, u => { r.bindTex(0, this.state.read); gl.uniform1i(u.u_src, 0); gl.uniform1f(u.u_aspect, A); gl.uniform1i(u.u_n, chunk.length); gl.uniform4fv(u.u_s, s); gl.uniform3fv(u.u_c, c); });
+        this.state.swap();
+      }
+    }
+
+    // 12 note sources on a slowly turning ring, ordered round the circle of fifths
+    const ch = F.chroma.subarray(i * 12, i * 12 + 12), harm = F.harmonic[i] * (0.4 + 0.6 * F.tonal[i]);
+    this.spin += (0.03 + 0.12 * F.energySlow[i]) * DT;
+    for (let k = 0; k < 12; k++) {
+      this.amp[k] += (ch[k] * ch[k] * harm - this.amp[k]) * 0.3;
+      const a = ((k * 7) % 12) / 12 * 2 * Math.PI - Math.PI / 2 + this.spin;
+      const [u, w] = uv(cx + Math.cos(a) * C.RING_RADIUS, cy + Math.sin(a) * C.RING_RADIUS);
+      this.em.set([u, w, this.amp[k], 0], k * 4);
+    }
+    const bass = 0.6 * F.sub[i] + 0.4 * F.bass[i];
+    const damp = C.DAMPING + (C.DAMPING_CALM - C.DAMPING) * calm;
+    const lens = C.LENS * (0.3 + 0.7 * F.lowmid[i]);
+    const src = new Float32Array(52);
+    gl.disable(gl.BLEND);
+    for (let s = 0; s < C.SUBSTEPS; s++) {
+      const t = (i + s / C.SUBSTEPS) * DT;
+      for (let k = 0; k < 12; k++) {
+        const f = C.NOTE_HZ * Math.pow(2, k / 12);         // higher notes ripple faster
+        src.set([this.em[k * 4], this.em[k * 4 + 1], C.NOTE_AMP * this.amp[k] * Math.sin(2 * Math.PI * f * t), 0.0004], k * 4);
+      }
+      src.set([core[0], core[1], C.BASS_AMP * bass * Math.sin(2 * Math.PI * C.BASS_HZ * t), 0.006], 48);
+      r.pass(this.P.step, this.state.write, u => {
+        r.bindTex(0, this.state.read); gl.uniform1i(u.u_state, 0);
+        gl.uniform2f(u.u_tx, 1 / C.SIM_W, 1 / C.SIM_H); gl.uniform1f(u.u_aspect, A); gl.uniform1f(u.u_c, Math.min(0.7, C.WAVE_SPEED));
+        gl.uniform1f(u.u_damp, damp); gl.uniform1f(u.u_edge, C.EDGE_ABSORB); gl.uniform1f(u.u_lens, lens);
+        gl.uniform2fv(u.u_core, core); gl.uniform4fv(u.u_src, src);
+      });
+      this.state.swap();
+    }
+  }
+
+  draw() {
+    const r = renderer, gl = r.gl, C = RIPPLE, F = this.F, i = this.frame;
+    const [, cold, hot, accent] = this.pal;
+    gl.disable(gl.BLEND);
+    const zoom = 1 + 0.03 * F.kick[i] + 0.03 * F.energySlow[i];
+    r.pass(this.P.display, r.acc, u => {
+      r.bindTex(0, this.state.read); gl.uniform1i(u.u_state, 0);
+      gl.uniform2f(u.u_tx, 1 / C.SIM_W, 1 / C.SIM_H); gl.uniform2f(u.u_c, CONFIG.CENTER[0] / CONFIG.W, 1 - CONFIG.CENTER[1] / CONFIG.H);
+      gl.uniform1f(u.u_zoom, zoom); gl.uniform1f(u.u_aspect, CONFIG.W / CONFIG.H);
+      gl.uniform1f(u.u_slope, C.SLOPE); gl.uniform1f(u.u_caus, C.CAUSTICS); gl.uniform1f(u.u_glint, C.GLINT * (0.5 + F.centroid[i]));
+      gl.uniform1f(u.u_tint, C.NOTE_TINT);
+      gl.uniform3fv(u.u_cold, cold); gl.uniform3fv(u.u_hot, hot); gl.uniform3fv(u.u_accent, accent);
+      gl.uniform4fv(u.u_em, this.em); gl.uniform3fv(u.u_emc, this.emc);
+    });
+    r.compose({ F, frame: i, bg: this.pal[0], glow: C.GLOW, exposure: C.EXPOSURE, fadeIn: C.FADE_IN, fadeOut: C.FADE_OUT });
+  }
+  stats() { return [["water grid", RIPPLE.SIM_W + "×" + RIPPLE.SIM_H], ["substeps", RIPPLE.SUBSTEPS]]; }
+}
+
 // =========================== VISUALISER MENU ===============================
 // Every visualiser shares the analysis, playback, recording and glow pass, and brings its own
 // physics, drawing, settings and "how the music drives it" table.
@@ -1280,7 +1462,7 @@ const VISUALISERS = [
     create: F => new Scene(F, CONFIG.N_PARTICLES),
   },
   {
-    id: "ink-tide", name: "Ink Tide", status: "On trial",
+    id: "ink-tide", name: "Ink Tide", status: "Kept",
     blurb: "Coloured ink swirling in a real fluid simulation",
     config: INK, sliders: INK_SLIDERS, particles: false,
     hints: { sub: "plume", kick: "blast", snare: "jets", lowmid: "swirl", hat: "curl", centroid: "–" },
@@ -1295,6 +1477,23 @@ const VISUALISERS = [
       ["Song sections", "Palette changes; quiet sections fade the ink slowly, leaving long smoky trails"],
     ],
     create: F => new InkTide(F),
+  },
+  {
+    id: "ripple-tank", name: "Ripple Tank", status: "On trial",
+    blurb: "Waves on water; notes interfere, drums drop stones",
+    config: RIPPLE, sliders: RIPPLE_SLIDERS, particles: false,
+    hints: { sub: "swell", kick: "stone", snare: "stones", lowmid: "lens", hat: "rain", centroid: "glints" },
+    mapping: [
+      ["Sub + bass", "A slow swell pulsing out from the centre"],
+      ["Kick", "A stone dropped in the centre: one ring races outward, plus a small camera punch-in"],
+      ["Snare", "Stones dropped either side of the centre; their rings cross and interfere"],
+      ["Low mids", "A lens of slower water in the middle that bends the waves and focuses light into caustics"],
+      ["Hats + air", "Raindrops all over the surface"],
+      ["12 pitch classes", "12 vibrating sources on a ring, each at its own frequency (higher notes ripple faster), coloured round the circle of fifths; chords make interference patterns"],
+      ["Brightness", "Sun glints on the ripples"],
+      ["Song sections", "Palette changes; quiet sections damp less, so ripples linger"],
+    ],
+    create: F => new RippleTank(F),
   },
 ];
 VISUALISERS.forEach(v => { v.defaults = JSON.parse(JSON.stringify(v.config)); });
