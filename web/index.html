@@ -3470,7 +3470,9 @@ class SteppeFlight {
     this.F = F; this.frame = -1; this.G = sigPrograms(renderer);
     this.cam = { x: 0, y: 300, z: 0, yaw: 0, pitch: 0.15, roll: 0 }; this.heading = 0; this.alt = 300;
     this.t = 0; this.E = 1; this.mH = 0; this.windAng = 1.2; this.gust = 0;
-    this.eagles = [0, 1, 2].map(k => ({ side: [-1, 1, 0.3][k], ahead: [650, 900, 1300][k], up: [40, -60, 120][k], ph: rng() * 6.28, dive: 0, flap: 0 }));
+    // eagles: each holds a slot beside you on a damped spring (offset from you: ahead, sideways, up)
+    this.eagles = [0, 1, 2].map(k => ({ side: [-1, 1, 0.3][k], ahead: [650, 900, 1300][k], up: [40, -60, 120][k], ph: rng() * 6.28,
+      off: null, vel: [0, 0, 0], flap: 0, flapAmt: 0, wing: rng() * 6.28 }));
     this.cranes = []; this.larks = []; this.streams = []; this.clouds = [];
     this.nextCrane = 6;
     this.pal = PALETTES[0].map(c => c.slice()); this.inst = new Float32Array(11 * 12000);
@@ -3525,8 +3527,20 @@ class SteppeFlight {
     const wx = Math.cos(this.windAng), wz = Math.sin(this.windAng); this.wx = wx; this.wz = wz;
 
     // eagles fly alongside; a clap makes one flap and stoop
-    if (F.snareHits.has(i) && F.snareHits.get(i) >= FLUX.CLAP_MIN && this.Lb > 0.05) { const e = this.eagles[Math.floor(rng() * 3)]; e.dive = 1; e.flap = 1.2; }
-    for (const e of this.eagles) { e.dive *= Math.exp(-0.9 * DT); e.flap = Math.max(0, e.flap - DT); e.ph += DT; if (rng() < 0.003) e.flap = 1; }
+    // a clap gives one eagle a downward push and a few wingbeats; the spring brings it back up smoothly
+    if (F.snareHits.has(i) && F.snareHits.get(i) >= FLUX.CLAP_MIN && this.Lb > 0.05 && this.t - (this.lastDive || -9) > 1.5) {
+      const e = this.eagles[Math.floor(rng() * 3)];
+      if (this.t - (e.lastDive || -9) > 4) { e.vel[2] -= 300; e.flap = 1.4; e.lastDive = this.lastDive = this.t; }   // a few seconds between dives
+    }
+    for (const e of this.eagles) {
+      const tgt = [e.ahead + 120 * Math.sin(this.t * 0.13 + e.ph), e.side * (380 + 140 * Math.sin(this.t * 0.09 + e.ph)), e.up + 60 * Math.sin(this.t * 0.21 + e.ph)];
+      if (!e.off) e.off = tgt.slice();
+      const w = 1.3, z = 0.85;                                     // natural frequency (rad/s) and damping
+      for (let k = 0; k < 3; k++) { e.vel[k] += (w * w * (tgt[k] - e.off[k]) - 2 * z * w * e.vel[k]) * DT; e.off[k] += e.vel[k] * DT; }
+      e.flap = Math.max(0, e.flap - DT); if (rng() < 0.002) e.flap = 1;
+      e.flapAmt += ((e.flap > 0 ? 1 : 0) - e.flapAmt) * (1 - Math.exp(-DT / 0.25));   // ease into and out of flapping
+      e.wing += DT * (0.8 + 8 * e.flapAmt);
+    }
     // melody: a flock of larks bursts up out of the grass ahead
     const note = F.melNotes.get(i);
     if (note && this.Lb > 0.05 && this.larks.length < 220 && rng() < 0.5) {
@@ -3714,8 +3728,10 @@ class SteppeFlight {
     if (birdIt > 0.01) {
       const gold = [1, 0.85, 0.55];
       for (const e of this.eagles) {
-        const d = e.ahead + 120 * Math.sin(t * 0.13 + e.ph), sd = e.side * (380 + 140 * Math.sin(t * 0.09 + e.ph)), up = e.up + 60 * Math.sin(t * 0.21 + e.ph) - 260 * Math.sin(Math.min(1, e.dive) * Math.PI);
-        const [ex, ez] = world(d, sd), ey = cam.y + up, flap = e.flap > 0 ? Math.sin(e.flap * 14) * 0.5 : 0.08 * Math.sin(t * 0.8 + e.ph), bank = 0.25 * Math.sin(t * 0.13 + e.ph);
+        if (!e.off) continue;
+        const [d, sd, up] = e.off;
+        const [ex, ez] = world(d, sd), ey = cam.y + up, flap = 0.08 * Math.sin(e.wing) * (1 - e.flapAmt) + 0.5 * Math.sin(e.wing) * e.flapAmt;
+        const bank = 0.25 * Math.sin(t * 0.13 + e.ph) - e.vel[1] * 0.0015;   // bank into sideways drift
         const span = 120, fwd = [fx, fz], right = [rxv, rzv];
         const wing = side => {                                  // a broad wing with fingered primary feathers
           const lift = Math.sin(flap + bank * side) * span * 0.35, o = side * span;
