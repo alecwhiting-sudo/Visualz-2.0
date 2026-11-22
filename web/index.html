@@ -156,7 +156,7 @@ table.map td:first-child { color: var(--photon); font-family: var(--font-mono); 
         <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg">
         <button id="demoBtn">Demo track</button>
       </div>
-      <div class="file-name" id="fileName">Demo: 40 s synth beat (intro, drop, breakdown, drop)</div>
+      <div class="file-name" id="fileName">Demo: Mix.mp3</div>
       <div class="stats" id="hits"></div>
     </section>
 
@@ -1138,7 +1138,23 @@ $("file").addEventListener("change", async e => {
   }
   e.target.value = "";
 });
-$("demoBtn").addEventListener("click", () => { $("fileName").textContent = "Demo: 40 s synth beat (intro, drop, breakdown, drop)"; loadBuffer(makeDemoTrack(), "demo"); });
+// The demo is Alec's track, published next to this page. If it can't be fetched (for example when
+// the page is opened straight from disk), fall back to the built-in synthetic beat.
+const DEMO_URL = "Mix.mp3";
+async function loadDemo() {
+  showOverlay("Loading the demo track", DEMO_URL, null);
+  try {
+    const res = await fetch(DEMO_URL);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const buf = await new OfflineAudioContext(2, 44100, 44100).decodeAudioData(await res.arrayBuffer());
+    $("fileName").textContent = "Demo: Mix.mp3 · " + fmtTime(buf.duration);
+    await loadBuffer(buf, "Mix");
+  } catch (e) {
+    $("fileName").textContent = "Demo: 40 s synth beat (Mix.mp3 could not be loaded here)";
+    await loadBuffer(makeDemoTrack(), "demo");
+  }
+}
+$("demoBtn").addEventListener("click", loadDemo);
 
 // ----- playback -----
 function ensureCtx() {
@@ -1265,5 +1281,5 @@ $("stillBtn").addEventListener("click", () => {
 });
 
 // open in a working state: analyse the built-in demo track straight away
-if (renderer) setTimeout(() => loadBuffer(makeDemoTrack(), "demo"), 50);
+if (renderer) setTimeout(loadDemo, 50);
 </script>

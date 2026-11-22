@@ -12,8 +12,9 @@ See `CLAUDE.md` for the full brief.
 
 ## Web POC
 
-Open `web/index.html` in Chrome, Safari or Firefox (desktop or phone). It starts with a
-built-in 40 s demo beat; use **Load MP3 or WAV** for your own track.
+Open `web/index.html` in Chrome, Safari or Firefox (desktop or phone). It starts with the demo
+track `web/Mix.mp3` (falls back to a built-in synth beat if the file cannot be fetched, e.g. when
+the page is opened straight from disk); use **Load MP3 or WAV** for any other track.
 
 - **Analysis** is a JavaScript port of `analyse.py` (bands, kick/snare/hat hits, chroma,
   brightness, loudness, song sections). On a test track it finds the same kick and hat hits as
