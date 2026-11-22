@@ -3101,6 +3101,9 @@ const AUR = {
   WIND: 260,                         // blizzard wind at full energy (units/s)
   SNOW: 700,                         // snowflakes around the camera
   WHALES: 4, WHALE_LEN: 620,
+  WHALE_MOTION: 0.4,                 // 0 = drifting, 1 = fast swimming, bold turns and breaching
+  STREAMS: 0.55,                     // data streams in the air: more to the right; the far right adds streaks
+  FISH: 0.6,                         // shoals of small fish
   ICE_INT: 0.22, SEA_INT: 0.26, AURORA_INT: 1.1, SNOW_INT: 0.8, WHALE_INT: 1.0,
   GLOW: 1.0, EXPOSURE: 1.9, FADE_IN: 1.5, FADE_OUT: 3.0,
   PALETTE_LOCK: -1,
@@ -3111,8 +3114,10 @@ const AUR_SLIDERS = [
   ["AURORA_INT", "Aurora", 0, 3, 0.05],
   ["SWELL", "Sea swell", 0, 150, 2],
   ["WIND", "Blizzard wind", 0, 800, 10],
-  ["CRACK_SPEED", "Crack speed", 200, 4000, 50],
   ["WHALE_INT", "Whales", 0, 3, 0.05],
+  ["WHALE_MOTION", "Whale motion", 0, 1, 0.01],
+  ["STREAMS", "Data streams", 0, 1, 0.01],
+  ["FISH", "Fish shoals", 0, 1, 0.01],
   ["ICE_INT", "Ice lines", 0, 0.6, 0.01],
 ];
 const AUR_VIEWS = ["skimming the ice", "aerial", "sky gaze", "round an iceberg"];
@@ -3133,7 +3138,9 @@ class AuroraShelf {
     for (let k = 0; k < C.WHALES; k++) this.whales.push({ x: (rng() - 0.5) * 4000, z: -1200 - rng() * 2800, hd: rng() * 6.28, ph: rng() * 6.28, depth: 60, surf: 0, len: C.WHALE_LEN * (0.8 + 0.4 * rng()) });
     this.cracks = []; this.spray = []; this.glints = [];
     this.snow = [];
-    for (let k = 0; k < C.SNOW; k++) this.snow.push({ x: (rng() - 0.5) * 3000, y: rng() * 1800, z: (rng() - 0.5) * 3000, g: rng() < 0.3 ? Math.floor(rng() * 16) : -1, ph: rng() * 6.28 });
+    for (let k = 0; k < C.SNOW; k++) this.snow.push({ x: (rng() - 0.5) * 3000, y: rng() * 1800, z: (rng() - 0.5) * 3000, g: rng() < 0.6 ? Math.floor(rng() * 36) : -1, ph: rng() * 6.28 });
+    this.streams = [];
+    this.shoals = Array.from({ length: 3 }, (_, k) => ({ ph: rng() * 6.28, cx: 0, cz: -2000, vx: 0, vz: 0, fish: [] }));
     this.curtains = Array.from({ length: 6 }, (_, k) => ({ z: -2200 - k * 420, x0: -3600 + rng() * 800, ph: rng() * 6.28, lit: 0, col: null }));
     this.pal = PALETTES[0].map(c => c.slice()); this.inst = new Float32Array(11 * 8192);
   }
@@ -3193,14 +3200,19 @@ class AuroraShelf {
     if (note) { const c = this.curtains[note.k % this.curtains.length]; c.lit = Math.min(1.5, c.lit + 0.6 * (0.5 + note.s)); c.col = STRING_COLORS[note.k].map(q => 0.4 + 0.6 * q); }
     for (const c of this.curtains) c.lit *= 0.985;
     // whales: slow and graceful, surfacing now and then; on a clap the nearest surfacer blows
+    const M = C.WHALE_MOTION; this.wm = M;
     for (const w of this.whales) {
-      w.ph += DT * 0.9;
-      w.hd += 0.08 * Math.sin(this.t * 0.07 + w.ph * 0.1) * DT;
-      if (w.z > -800) w.hd += 0.3 * DT; if (Math.abs(w.x) > 3500) w.hd += 0.3 * DT;
-      const sp = 110 * (0.6 + 0.4 * E);
+      w.ph += DT * (0.9 + 1.6 * M);                                      // tail beat rate
+      w.clock = (w.clock ?? w.ph) + DT * (0.11 + 0.35 * M);              // surfacing rhythm
+      w.hd += (0.08 + 0.5 * M) * Math.sin(this.t * (0.07 + 0.2 * M) + w.ph * 0.1) * DT;
+      if (w.z > -800) w.hd += (0.3 + 0.6 * M) * DT; if (Math.abs(w.x) > 3500) w.hd += (0.3 + 0.6 * M) * DT;
+      const sp = 110 * (0.6 + 0.4 * E) * (0.5 + 3 * M);
       w.x += Math.sin(w.hd) * sp * DT; w.z += Math.cos(w.hd) * sp * DT;
-      w.surf = 0.5 + 0.5 * Math.sin(this.t * 0.11 + w.ph * 0.3);
-      w.depth = 12 + 60 * (1 - w.surf);
+      w.surf = 0.5 + 0.5 * Math.sin(w.clock);
+      const breach = M > 0.6 ? Math.pow(Math.max(0, Math.sin(w.clock * 0.5 + w.len)), 12) * 380 * (M - 0.6) / 0.4 : 0;   // leaps clear of the water
+      const d = 12 + 60 * (1 - w.surf) - breach;
+      w.pitch = Math.atan2(((w.depth ?? d) - d) / DT, Math.max(40, sp)) * 0.8; w.depth = d;
+      w.beat = 0.05 * (0.6 + 1.8 * M);
     }
     if (F.snareHits.has(i) && F.snareHits.get(i) >= FLUX.CLAP_MIN && this.Lw > 0.05) {
       const w = this.whales.slice().sort((a, b) => b.surf - a.surf)[0];
@@ -3212,8 +3224,37 @@ class AuroraShelf {
     }
     for (const p of this.spray) { p.age += DT; p.vy -= 380 * DT; p.x += (p.vx + wx * 0.3) * DT; p.y += p.vy * DT; p.z += (p.vz + wz * 0.3) * DT; }
     this.spray = this.spray.filter(p => p.age < p.life && p.y > -20);
+    // data streams: ribbons of characters snaking through the air with the wind; melody launches coloured ones
+    const cam = this.cam, Sv = C.STREAMS * this.Ls, want = Math.round(14 * Math.min(1, Sv * 1.6) * (0.4 + 0.6 * E));
+    const launch = col => {
+      const h = this.windAng + rng.normal(0, 0.6), L = 2600 + rng() * 2000;
+      this.streams.push({ ox: cam.x - Math.cos(h) * 1600 + (rng() - 0.5) * 2600, oz: cam.z - Math.sin(h) * 1600 + (rng() - 0.5) * 2600, oy: 150 + rng() * 1100,
+        h, L, s0: 0, v: (450 + 450 * rng()) * (0.6 + 0.6 * E), A: 80 + rng() * 260, k: 0.0015 + rng() * 0.002, ph: rng() * 6.28,
+        n: 20 + Math.floor(rng() * 40), chars: Array.from({ length: 60 }, () => Math.floor(rng() * 36)), col });
+    };
+    if (this.streams.filter(q => !q.note).length < want && rng() < 0.15) launch([0.85, 0.95, 1]);
+    if (note && Sv > 0.05 && rng() < Sv) { launch(STRING_COLORS[note.k].map(q => 0.5 + 0.5 * q)); this.streams[this.streams.length - 1].note = true; }
+    for (const st of this.streams) { st.s0 += st.v * DT; if (rng() < 0.3) st.chars[Math.floor(rng() * 60)] = Math.floor(rng() * 36); }
+    this.streams = this.streams.filter(st => st.s0 - st.n * 45 < st.L);
+    // fish shoals: schools that hold together, swirl along, flee whales and scatter on kicks
+    const nf = Math.round(45 * C.FISH * this.Lw);
+    this.shoals.forEach((sh, k) => {
+      const q = this.t * 0.05 + sh.ph, tx = 2600 * Math.sin(q * 1.3 + k * 2), tz = -2400 + 1400 * Math.sin(q * 0.9 + k);
+      sh.vx = (tx - sh.cx) * 0.5; sh.vz = (tz - sh.cz) * 0.5; sh.cx += sh.vx * DT; sh.cz += sh.vz * DT;
+      while (sh.fish.length < nf) sh.fish.push({ x: sh.cx + (rng() - 0.5) * 200, y: -40 - rng() * 80, z: sh.cz + (rng() - 0.5) * 200, vx: 0, vy: 0, vz: 0 });
+      if (sh.fish.length > nf) sh.fish.length = nf;
+      for (const f of sh.fish) {
+        let ax = (sh.cx - f.x) * 0.6 + (sh.vx - f.vx) * 0.8 - (f.z - sh.cz) * 0.4, az = (sh.cz - f.z) * 0.6 + (sh.vz - f.vz) * 0.8 + (f.x - sh.cx) * 0.4;   // cohesion, alignment, swirl
+        const ay = (-70 - f.y) * 0.8 + Math.sin(this.t * 1.7 + f.x * 0.01) * 20;
+        for (const o of sh.fish) { if (o === f) continue; const dx = f.x - o.x, dz = f.z - o.z, d2 = dx * dx + dz * dz; if (d2 < 1600 && d2 > 1) { const d = Math.sqrt(d2); ax += dx / d * (40 - d) * 12; az += dz / d * (40 - d) * 12; } }
+        for (const w of this.whales) { const dx = f.x - w.x, dz = f.z - w.z, d = Math.hypot(dx, dz); if (d < w.len * 0.6) { ax += dx / (d + 1) * 900; az += dz / (d + 1) * 900; } }
+        if (F.kickHits.has(i)) { const dx = f.x - sh.cx, dz = f.z - sh.cz, d = Math.hypot(dx, dz) + 1; f.vx += dx / d * 220; f.vz += dz / d * 220; }
+        f.vx += ax * DT; f.vy += ay * DT; f.vz += az * DT;
+        const sp2 = Math.hypot(f.vx, f.vz), cap = 300 * (0.6 + 0.6 * E); if (sp2 > cap) { f.vx *= cap / sp2; f.vz *= cap / sp2; }
+        f.x += f.vx * DT; f.y += f.vy * DT; f.z += f.vz * DT; f.vy *= 0.9;
+      }
+    });
     // the blizzard: flakes blow through a box that travels with the camera
-    const cam = this.cam;
     for (const f of this.snow) {
       f.x += (wx + 30 * Math.sin(this.t * 1.3 + f.ph)) * DT; f.z += wz * DT; f.y -= (60 + 40 * Math.sin(f.ph)) * DT;
       if (f.x - cam.x > 1500) f.x -= 3000; if (f.x - cam.x < -1500) f.x += 3000;
@@ -3294,17 +3335,42 @@ class AuroraShelf {
       const fx = Math.sin(w.hd), fz = Math.cos(w.hd), sx = fz, sz = -fx, L = w.len, it = C.WHALE_INT * this.Lw;
       const body = (s, a, rr) => {                       // s from nose (0) to tail (1), a round the body
         const R = L * 0.11 * Math.pow(Math.sin(Math.PI * Math.min(0.999, Math.pow(s, 0.75))), 0.9) * rr;
-        const und = Math.sin(w.ph * 1.6 - s * 3) * 0.05 * L * s * s;
-        const along = (0.35 - s) * L, cx = w.x + fx * along, cz = w.z + fz * along, cy = -w.depth + und;
+        const und = Math.sin(w.ph * 1.6 - s * 3) * (w.beat || 0.05) * L * s * s;
+        const along = (0.35 - s) * L, cp = Math.cos(w.pitch || 0), cx = w.x + fx * along * cp, cz = w.z + fz * along * cp, cy = -w.depth + und + along * Math.sin(w.pitch || 0);
         return [cx + sx * Math.cos(a) * R, cy + Math.sin(a) * R * 0.8, cz + sz * Math.cos(a) * R];
       };
-      const col = ice.map((q, k) => q * 0.6 + hot[k] * 0.4), under = 0.85;
+      const col = ice.map((q, k) => q * 0.6 + hot[k] * 0.4), under = w.depth < 0 ? 1.3 : 0.85;
       for (let k = 1; k < 9; k++) { const s2 = k / 9, ring = []; for (let q = 0; q <= 16; q++) ring.push(body(s2, q / 16 * 2 * Math.PI, 1)); poly(ring, col, it * 0.6 * under); }
       for (let q = 0; q < 8; q++) { const line = []; for (let k = 0; k <= 24; k++) line.push(body(k / 24, q / 8 * 2 * Math.PI, 1)); poly(line, col, it * under); }
-      const tail = body(1, 0, 0), beat = Math.sin(w.ph * 1.6 - 3) * 0.12 * L;   // flukes
+      const tail = body(1, 0, 0), beat = Math.sin(w.ph * 1.6 - 3) * (w.beat || 0.05) * 2.4 * L;   // flukes
       for (const side of [1, -1]) poly([tail, [tail[0] + sx * side * 0.17 * L - fx * 0.08 * L, tail[1] + beat, tail[2] + sz * side * 0.17 * L - fz * 0.08 * L], [tail[0] + sx * side * 0.05 * L - fx * 0.02 * L, tail[1] + beat * 0.6, tail[2] + sz * side * 0.05 * L - fz * 0.02 * L], tail], col, it);
       const pec = body(0.3, 0, 1);                   // pectoral fins
       for (const side of [1, -1]) poly([body(0.3, side > 0 ? 0 : Math.PI, 1), [pec[0] + sx * side * 0.16 * L - fx * 0.07 * L, pec[1] - 0.05 * L, pec[2] + sz * side * 0.16 * L - fz * 0.07 * L], body(0.38, side > 0 ? 0 : Math.PI, 1)], col, it * 0.8);
+    }
+    // fish: tiny wireframe bodies with a forked tail, seen under the surface
+    const fishCol = cold.map(q => 0.5 + 0.5 * q);
+    for (const sh of this.shoals) for (const f of sh.fish) {
+      const sp2 = Math.hypot(f.vx, f.vz) + 1e-3, hx = f.vx / sp2, hz = f.vz / sp2, px = -hz, pz = hx, L2 = 34, wag = Math.sin(t * 9 + f.x * 0.05) * 5;
+      const nose = [f.x + hx * L2 * 0.5, f.y, f.z + hz * L2 * 0.5], tail = [f.x - hx * L2 * 0.5, f.y, f.z - hz * L2 * 0.5];
+      const top = [f.x + px * 6, f.y + 4, f.z + pz * 6], bot = [f.x - px * 6, f.y - 4, f.z - pz * 6];
+      poly([nose, top, tail, bot, nose], fishCol, 0.5 * this.Lw);
+      poly([[tail[0] + px * (9 + wag) - hx * 10, tail[1], tail[2] + pz * (9 + wag) - hz * 10], tail, [tail[0] - px * (9 - wag) - hx * 10, tail[1], tail[2] - pz * (9 - wag) - hz * 10]], fishCol, 0.45 * this.Lw);
+    }
+    // data streams: where each character has been (a streak, longer towards the far right of the slider)
+    const path = (st, ss) => { const w = st.A * Math.sin(ss * st.k + st.ph); return [st.ox + Math.cos(st.h) * ss + Math.sin(st.h) * w, st.oy + 90 * Math.sin(ss * 0.0023 + st.ph * 2), st.oz + Math.sin(st.h) * ss - Math.cos(st.h) * w]; };
+    const streak = Math.max(0, (C.STREAMS - 0.6) / 0.4);
+    if (streak > 0.01 && this.Ls > 0.02) for (const st of this.streams) {
+      const back = streak * 700 * (st.v / 700), stride = Math.max(1, Math.floor(back / 120)), soft = Math.min(1, 160 / Math.max(1, back)) * stride;
+      for (let q = 0; q < st.n; q += stride) {
+        const ss = st.s0 - q * 45; if (ss < 0 || ss > st.L) continue;
+        let prev = P(...path(st, ss));
+        for (let k = 1; k <= 10; k++) {
+          const cur = P(...path(st, Math.max(0, ss - back * k / 10))); if (!prev || !cur) break;
+          const dx = cur[0] - prev[0], dy = cur[1] - prev[1], m2 = Math.max(1, Math.ceil(Math.hypot(dx, dy) / 3)), f = 0.3 * soft * Math.pow(1 - k / 11, 1.5) * fog(prev[2]) * this.Ls;
+          if (m2 < 400) for (let j = 0; j < m2; j++) r.pushDot(n++, prev[0] + dx * j / m2, prev[1] + dy * j / m2, st.col[0], st.col[1], st.col[2], f);
+          prev = cur;
+        }
+      }
     }
     // spray and snow: dots, with some characters among them
     for (const p of this.spray) if (p.g < 0) point(p.x, p.y, p.z, ice, 0.6 * (1 - p.age / p.life));
@@ -3317,7 +3383,12 @@ class AuroraShelf {
     gl.drawArrays(gl.POINTS, 0, n);
     let m = 0; const I = this.inst;
     const put = (X, Y, Z, size, g, c, it) => { if ((m + 1) * 11 <= I.length) { I.set([X, Y, Z, 0, 1, size, g, c[0], c[1], c[2], it], m * 11); m++; } };
-    if (this.Ls > 0.02) for (const f of this.snow) if (f.g >= 0) put(f.x, f.y, f.z, 22, f.g, [0.9, 0.95, 1], C.SNOW_INT * 0.9 * this.Ls * (0.5 + 2 * (f.glint || 0)));
+    if (this.Ls > 0.02) for (const f of this.snow) if (f.g >= 0) put(f.x, f.y, f.z, 26, f.g, [0.9, 0.95, 1], C.SNOW_INT * 0.9 * this.Ls * (0.5 + 2 * (f.glint || 0)));
+    if (this.Ls > 0.02) for (const st of this.streams) for (let q = 0; q < st.n; q++) {
+      const ss = st.s0 - q * 45; if (ss < 0 || ss > st.L) continue;
+      const fade = Math.min(1, ss / 300, (st.L - ss) / 300), [X, Y, Z] = path(st, ss);
+      put(X, Y, Z, 34, st.chars[q % 60], q ? st.col : [1, 1, 1], 0.75 * this.Ls * fade * (q ? 1 - 0.5 * q / st.n : 1.6));
+    }
     for (const p of this.spray) if (p.g >= 0) put(p.x, p.y, p.z, 30, p.g, ice, 0.7 * (1 - p.age / p.life));
     const G = this.G.glyph;
     gl.bindVertexArray(this.G.vao); gl.bindBuffer(gl.ARRAY_BUFFER, this.G.buf);
@@ -3331,7 +3402,7 @@ class AuroraShelf {
     this.points = n;
     r.compose({ F, frame: i, bg: [0, 0, 0], glow: C.GLOW, exposure: C.EXPOSURE, fadeIn: C.FADE_IN, fadeOut: C.FADE_OUT });
   }
-  stats() { return [["view", AUR_VIEWS[this.view % 4] || "–"], ["cracks", this.cracks.length], ["spray", this.spray.length], ["points", (this.points || 0).toLocaleString()]]; }
+  stats() { return [["view", AUR_VIEWS[this.view % 4] || "–"], ["streams", this.streams.length], ["fish", this.shoals.reduce((a, q) => a + q.fish.length, 0)], ["points", (this.points || 0).toLocaleString()]]; }
 }
 
 // =========================== VISUALISER MENU ===============================
@@ -3497,6 +3568,8 @@ const VISUALISERS = [
       ["Sub + bass", "The sea swell rises and the icebergs heave"],
       ["Melody", "A band of aurora brightens and ripples in the note's colour"],
       ["Clap", "A whale near the surface blows a spout of data spray"],
+      ["Melody (streams)", "Also launches a stream of characters in the note's colour, snaking through the air on the wind"],
+      ["Fish", "Shoals of small fish school together, swirl along, swerve away from whales and scatter on kicks"],
       ["Hats", "Ice crystals glint in the snow"],
       ["Low mids", "The wind turns, carrying the snow"],
       ["Story effects", "Ice & cracks, aurora, data snow and whales, chapter by chapter"],
