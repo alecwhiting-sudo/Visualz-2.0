@@ -22,7 +22,7 @@ A link ending in `#ink-tide` (or any visualiser id) opens that visualiser direct
 | 2 | Ink Tide (`ink-tide`) | Kept | 2-D incompressible Navier–Stokes (stable fluids on the GPU); every force is a vortex pair |
 | 3 | Ripple Tank (`ripple-tank`) | On trial | 2-D damped wave equation; 12 note sources at pitch-scaled frequencies interfere, a refracting lens focuses caustics |
 | 4 | Flux Lattice (`flux-lattice`) | On trial | Wave equation on a flexible 2-D grid that kicks bend and claps snap; each melody note releases a light pulse that bounces off the frame and is thrown by the grid's slope; cymbal lasers reflect round the frame |
-| 5 | Critter Bloom (`critter-bloom`) | On trial | Steering behaviours (wander, separation, huddle, pursuit) for original pixel critters; friends chase and bond (spinning pairs) then burst into drag-damped spark explosions |
+| 5 | Deep Voyage (`deep-voyage`) | On trial | 3-D perspective flight; speed from the story energy; noise-tunnel gas clouds; shaded planets with rings; black holes with lens-equation light bending and accretion discs |
 
 ### Story
 
