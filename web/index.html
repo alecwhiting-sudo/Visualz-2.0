@@ -1543,12 +1543,14 @@ const LAYER_NAMES = { grid: "Grid", kicks: "Kick waves", claps: "Clap snaps", pa
                       streams: "Data streams", field: "Number field", wireframes: "Wireframes", smoke: "Smoke",
                       city: "City", data: "Data links", sky: "Sky membrane", scans: "Scan planes",
                       trees: "Trees", leaves: "Leaves", rain: "Data rain", beings: "Light beings",
-                      ice: "Ice & cracks", aurora: "Aurora", snow: "Data snow", whales: "Whales" };
+                      ice: "Ice & cracks", aurora: "Aurora", snow: "Data snow", whales: "Whales",
+                      steppe: "Steppe", mountains: "Mountains", life: "Gers & herds", birds: "Birds", clouds: "Data clouds", wind: "Data wind" };
 // effects that have no rule of their own in the default story copy one that does
 const LAYER_LIKE = { nebula: "grid", comets: "packets", planets: "kicks", blackholes: "lasers", streams: "packets", field: "grid", wireframes: "kicks",
                      city: "grid", data: "packets", sky: "kicks", scans: "claps",
                      trees: "grid", rain: "packets", beings: "grid",
-                     ice: "grid", aurora: "packets", snow: "lasers", whales: "kicks" };
+                     ice: "grid", aurora: "packets", snow: "lasers", whales: "kicks",
+                     steppe: "grid", mountains: "lasers", life: "grid", birds: "grid", clouds: "grid", wind: "packets" };
 const LAYER_OFF = { smoke: true };      // used sparingly: off unless a chapter turns it on
 const layerOn = (sec, k) => k in sec.layers ? !!sec.layers[k] : LAYER_OFF[k] ? false
   : LAYER_LIKE[k] && LAYER_LIKE[k] in sec.layers ? !!sec.layers[LAYER_LIKE[k]] : sec.layers.kicks !== false;
@@ -2260,7 +2262,7 @@ function sigPrograms(r) {
   const CAMU = `uniform vec3 u_cam; uniform float u_pitch; uniform float u_yaw; uniform float u_f; uniform vec2 u_cs; uniform vec2 u_world;`;
   const glyph = r.program(`#version 300 es
     layout(location=0) in vec3 a_p; layout(location=1) in vec2 a_d; layout(location=2) in float a_s; layout(location=3) in float a_g; layout(location=4) in vec4 a_c;
-    ${CAMU} uniform float u_fog; uniform float u_screen;
+    ${CAMU} uniform float u_fog; uniform float u_screen; uniform float u_roll;
     out vec2 v_t; out vec4 v_c;
     void main(){
       vec2 corner = vec2(float(gl_VertexID & 1), float((gl_VertexID >> 1) & 1));
@@ -2275,7 +2277,9 @@ function sigPrograms(r) {
         float cp = cos(u_pitch), spt = sin(u_pitch);
         float zc = -r.y * spt + r.z * cp, yc = r.y * cp + r.z * spt;
         if (zc < 5.0) { gl_Position = vec4(2.0, 2.0, 0.0, 1.0); return; }
-        sp = u_cs + vec2(r.x, -yc) / zc * u_f + (corner - vec2(0.5, 1.0)) * vec2(0.62, 1.0) * a_s * u_f / zc;
+        vec2 q = vec2(r.x, -yc) / zc * u_f + (corner - vec2(0.5, 1.0)) * vec2(0.62, 1.0) * a_s * u_f / zc;
+        float cr = cos(u_roll), sr = sin(u_roll);
+        sp = u_cs + vec2(q.x * cr - q.y * sr, q.x * sr + q.y * cr);
         v_c.a *= exp(-zc * u_fog);
       }
       gl_Position = vec4(sp.x / u_world.x * 2.0 - 1.0, 1.0 - sp.y / u_world.y * 2.0, 0.0, 1.0);
@@ -3429,6 +3433,315 @@ class AuroraShelf {
   stats() { return [["view", AUR_VIEWS[this.view % 4] || "–"], ["streams", this.streams.length], ["fish", this.shoals.reduce((a, q) => a + q.fish.length, 0)], ["points", (this.points || 0).toLocaleString()]]; }
 }
 
+// =========================== VISUALISER 10: STEPPE FLIGHT ==================
+// Flying like an eagle over endless Mongolian grassland: rolling wireframe steppe, camps of gers,
+// grazing herds, and mountain ranges that rise out of the land as the story builds. Eagles fly
+// alongside, cranes cross in V formation, larks burst from the grass on melody notes. Data wind
+// ripples the grass and carries ribbons of characters; data clouds are long streaky swarms.
+const STEPPE = {
+  SEED: 101, FOCAL: 950,
+  FLY: 2600,                         // speed at full energy (units/s), on top of a cruise of 500
+  ALTITUDE: 1,                       // height multiplier for every flight style
+  SWOOP: 0.5,                        // how deep the bass and the swooping style take you up and down
+  MOUNTAINS: 1,                      // how high the mountains rise
+  WIND: 0.6,                         // data wind: grass waves and ribbons of characters
+  CLOUDS: 0.7,                       // data clouds: long streaky swarms
+  LAND_INT: 0.42, LIFE_INT: 0.7, BIRD_INT: 1.0,
+  GLOW: 0.9, EXPOSURE: 2.0, FADE_IN: 1.5, FADE_OUT: 3.0,
+  PALETTE_LOCK: -1,
+};
+const STEPPE_SLIDERS = [
+  ["GLOW", "Glow", 0, 2.5, 0.05],
+  ["EXPOSURE", "Exposure", 0.6, 3, 0.05],
+  ["FLY", "Flight speed", 0, 8000, 100],
+  ["ALTITUDE", "Altitude", 0.2, 3, 0.05],
+  ["SWOOP", "Swoops", 0, 1, 0.01],
+  ["MOUNTAINS", "Mountains", 0, 2, 0.05],
+  ["WIND", "Data wind", 0, 1, 0.01],
+  ["CLOUDS", "Data clouds", 0, 1, 0.01],
+  ["BIRD_INT", "Birds", 0, 2, 0.05],
+];
+const STEPPE_STYLES = ["skimming the grass", "eagle cruise", "high soar", "swooping"];
+const hash2 = (a, b) => { const h = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return h - Math.floor(h); };
+
+class SteppeFlight {
+  constructor(F) {
+    const rng = this.rng = makeRng(STEPPE.SEED);
+    this.F = F; this.frame = -1; this.G = sigPrograms(renderer);
+    this.cam = { x: 0, y: 300, z: 0, yaw: 0, pitch: 0.15, roll: 0 }; this.heading = 0; this.alt = 300;
+    this.t = 0; this.E = 1; this.mH = 0; this.windAng = 1.2; this.gust = 0;
+    this.eagles = [0, 1, 2].map(k => ({ side: [-1, 1, 0.3][k], ahead: [650, 900, 1300][k], up: [40, -60, 120][k], ph: rng() * 6.28, dive: 0, flap: 0 }));
+    this.cranes = []; this.larks = []; this.streams = []; this.clouds = [];
+    this.nextCrane = 6;
+    this.pal = PALETTES[0].map(c => c.slice()); this.inst = new Float32Array(11 * 12000);
+  }
+  dispose() {}
+
+  steppe(x, z) { return 60 * Math.sin(x * 0.0007) * Math.sin(z * 0.0005) + 35 * Math.sin(x * 0.0013 + z * 0.0009) + 18 * Math.sin(x * 0.0031 - z * 0.0023) + 8 * Math.sin(x * 0.007 + z * 0.006); }
+  mount(x, z) {
+    if (this.mH < 0.002) return 0;
+    const r = 1 - Math.abs(Math.sin(x * 0.00023 + 0.8 * Math.sin(z * 0.00017))), r2 = 1 - Math.abs(Math.sin(x * 0.0006 - z * 0.0004 + 1.3));
+    const mask = Math.max(0, Math.sin(z * 0.00004 + 1) * 0.6 + 0.4 + 0.3 * Math.sin(x * 0.00011));
+    return this.mH * (Math.pow(r, 4) * 2300 + Math.pow(r2, 3) * 500) * mask;
+  }
+  H(x, z) { return this.steppe(x, z) + this.mount(x, z); }
+
+  step(i) {
+    const C = STEPPE, F = this.F, rng = this.rng, cam = this.cam;
+    this.frame = i; this.t = i * DT;
+    const E = STORY.energy(i), v = STORY.variant(i); this.E = E; this.style = v;
+    this.Ls = STORY.layer("steppe", i); this.Ll = STORY.layer("life", i); this.Lb = STORY.layer("birds", i);
+    this.Lc = STORY.layer("clouds", i); this.Lw = STORY.layer("wind", i);
+    this.mH += (C.MOUNTAINS * STORY.layer("mountains", i) - this.mH) * (1 - Math.exp(-DT / 3));   // mountains rise slowly
+    const target = PALETTES[C.PALETTE_LOCK >= 0 ? C.PALETTE_LOCK : STORY.palette(i, F)];
+    const kp = 1 - Math.exp(-1.2 * DT);
+    for (let a = 0; a < 4; a++) for (let c = 0; c < 3; c++) this.pal[a][c] += (target[a][c] - this.pal[a][c]) * kp;
+    // flight: speed from energy, low mids bank and turn, styles set the height, bass pulls you down
+    const speed = 500 + C.FLY * E * E; this.speed = speed;
+    const turn = 0.12 * Math.sin(this.t * 0.05) + 0.25 * (F.lowmid[i] - 0.4);
+    this.heading += turn * DT; this.heading = clamp(this.heading, -0.45, 0.45);
+    cam.x += Math.sin(this.heading) * speed * DT; cam.z += Math.cos(this.heading) * speed * DT;
+    const bass = 0.6 * F.sub[i] + 0.4 * F.bass[i];
+    const styleAlt = [90, 450, 1900, 700 + 650 * Math.sin(this.t * 0.5)][v % 4] * C.ALTITUDE;
+    const want = styleAlt * (1 - C.SWOOP * 0.6 * bass) + (v % 4 === 3 ? C.SWOOP * 500 * Math.sin(this.t * 0.5) : 0);
+    this.alt += (want - this.alt) * (1 - Math.exp(-DT / 1.2));
+    const fx = Math.sin(this.heading), fz = Math.cos(this.heading);
+    let ground = this.H(cam.x, cam.z);
+    for (const d of [300, 800, 1600]) ground = Math.max(ground, this.H(cam.x + fx * d, cam.z + fz * d) - d * 0.15);   // climb before ridges
+    const wantY = ground + Math.max(40, this.alt);
+    cam.y += (wantY - cam.y) * (1 - Math.exp(-DT / 0.6));
+    cam.yaw = this.heading; cam.pitch = 0.28 + Math.min(0.4, this.alt / 6000); cam.roll += (-turn * 1.6 - cam.roll) * (1 - Math.exp(-DT / 0.8));
+    // wind: kicks gust through the grass
+    this.windAng += 0.2 * (F.lowmid[i] - 0.4) * DT;
+    if (F.kickHits.has(i)) this.gust = Math.min(2, this.gust + 0.6 * (0.4 + 0.6 * F.kickHits.get(i)));
+    this.gust *= Math.exp(-2 * DT);
+    const wx = Math.cos(this.windAng), wz = Math.sin(this.windAng); this.wx = wx; this.wz = wz;
+
+    // eagles fly alongside; a clap makes one flap and stoop
+    if (F.snareHits.has(i) && F.snareHits.get(i) >= FLUX.CLAP_MIN && this.Lb > 0.05) { const e = this.eagles[Math.floor(rng() * 3)]; e.dive = 1; e.flap = 1.2; }
+    for (const e of this.eagles) { e.dive *= Math.exp(-0.9 * DT); e.flap = Math.max(0, e.flap - DT); e.ph += DT; if (rng() < 0.003) e.flap = 1; }
+    // melody: a flock of larks bursts up out of the grass ahead
+    const note = F.melNotes.get(i);
+    if (note && this.Lb > 0.05 && this.larks.length < 220 && rng() < 0.5) {
+      const d = 500 + rng() * 1800, s = (rng() - 0.5) * 1400, x0 = cam.x + fx * d + fz * s, z0 = cam.z + fz * d - fx * s, col = STRING_COLORS[note.k].map(q => 0.55 + 0.45 * q);
+      for (let k = 0; k < 10 + Math.floor(rng() * 14); k++) this.larks.push({ x: x0 + (rng() - 0.5) * 120, y: this.H(x0, z0) + 5, z: z0 + (rng() - 0.5) * 120, vx: (rng() - 0.5) * 260, vy: 220 + rng() * 260, vz: (rng() - 0.5) * 260, age: 0, ph: rng() * 6.28, col });
+    }
+    for (const l of this.larks) {
+      l.age += DT; l.vy += (Math.sin(l.age * 9 + l.ph) * 300 - 120) * DT;    // bounding, fluttery flight
+      l.vx += wx * 60 * DT; l.vz += wz * 60 * DT;
+      l.x += l.vx * DT; l.y += l.vy * DT; l.z += l.vz * DT;
+    }
+    this.larks = this.larks.filter(l => l.age < 5);
+    // cranes cross the sky in V formation
+    if (this.t > this.nextCrane) {
+      this.nextCrane = this.t + 14 + rng() * 14;
+      if (this.Lb > 0.3) {
+        const d = 5000 + rng() * 3000, side = rng() < 0.5 ? -1 : 1, x0 = cam.x + fx * d - fz * side * 3500, z0 = cam.z + fz * d + fx * side * 3500;
+        this.cranes.push({ x: x0, z: z0, y: this.H(x0, z0) + 700 + rng() * 600, vx: fz * side * 220 + fx * 60, vz: -fx * side * 220 + fz * 60, n: 9 + 2 * Math.floor(rng() * 4), ph: rng() * 6.28, age: 0 });
+      }
+    }
+    for (const c of this.cranes) { c.age += DT; c.x += c.vx * DT; c.z += c.vz * DT; c.ph += DT * 2.2; }
+    this.cranes = this.cranes.filter(c => c.age < 45);
+    // data wind: ribbons of characters riding low over the grass
+    const want2 = Math.round(16 * C.WIND * this.Lw * (0.4 + 0.6 * E));
+    if (this.streams.length < want2 && rng() < 0.2) {
+      const d = 300 + rng() * 4000, s = (rng() - 0.5) * 3000, h = this.windAng + rng.normal(0, 0.4);
+      this.streams.push({ ox: cam.x + fx * d + fz * s - Math.cos(h) * 1500, oz: cam.z + fz * d - fx * s - Math.sin(h) * 1500, h, L: 3000, s0: 0, v: 500 + 500 * rng() + 300 * E,
+        lift: 30 + rng() * 140, A: 60 + rng() * 200, k: 0.002 + rng() * 0.002, ph: rng() * 6.28, n: 18 + Math.floor(rng() * 30), chars: Array.from({ length: 48 }, () => Math.floor(rng() * 36)) });
+    }
+    for (const st of this.streams) { st.s0 += st.v * (1 + this.gust) * DT; if (rng() < 0.3) st.chars[Math.floor(rng() * 48)] = Math.floor(rng() * 36); }
+    this.streams = this.streams.filter(st => st.s0 - st.n * 40 < st.L);
+    // data clouds: long streaky swarms that drift high up; new ones form far ahead
+    while (this.clouds.length < Math.round(7 * C.CLOUDS * this.Lc)) {
+      const d = 6000 + rng() * 12000, s = (rng() - 0.5) * 9000, len = 3000 + rng() * 5000, parts = [];
+      for (let k = 0; k < 350; k++) { const u = rng() * 2 - 1, w = rng.normal(0, 0.35); parts.push([u * len / 2, w * len * 0.12 * Math.sqrt(1 - u * u), rng.normal(0, 60), 80 + rng() * 380, rng() < 0.22 ? Math.floor(rng() * 36) : -1]); }
+      this.clouds.push({ x: cam.x + fx * d + fz * s, z: cam.z + fz * d - fx * s, y: 900 + rng() * 1500, parts, ang: this.windAng });
+    }
+    if (this.clouds.length > Math.round(7 * C.CLOUDS * this.Lc) + 1) this.clouds.pop();
+    for (const c of this.clouds) { c.x += wx * 80 * DT; c.z += wz * 80 * DT; c.ang += (this.windAng - c.ang) * 0.1 * DT; }
+    this.clouds = this.clouds.filter(c => (c.x - cam.x) * fx + (c.z - cam.z) * fz > -5000);
+  }
+
+  draw() {
+    const r = renderer, gl = r.gl, C = STEPPE, F = this.F, i = this.frame, s = r.scale, cam = this.cam, E = this.E, t = this.t;
+    const W = CONFIG.W, H = CONFIG.H, [, cold, hot, acc] = this.pal;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, r.acc.fb); gl.viewport(0, 0, r.acc.w, r.acc.h);
+    gl.disable(gl.BLEND); gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+    let n = 0;
+    const cr = Math.cos(cam.roll), sr = Math.sin(cam.roll);
+    const P = (X, Y, Z) => {
+      const rx = X - cam.x, ry = Y - cam.y, rz = Z - cam.z, cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw);
+      const x2 = rx * cy - rz * sy, z2 = rx * sy + rz * cy, cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+      const zc = -ry * sp + z2 * cp, yc = ry * cp + z2 * sp;
+      if (zc < 8) return null;
+      const qx = x2 / zc * C.FOCAL, qy = -yc / zc * C.FOCAL;
+      return [W / 2 + qx * cr - qy * sr, H / 2 + qx * sr + qy * cr, zc];
+    };
+    const fog = zc => Math.exp(-zc * 0.00006);
+    const poly = (pts, col, it, gap = 2.4) => {
+      let a = P(...pts[0]);
+      for (let q = 1; q < pts.length; q++) {
+        const b = P(...pts[q]);
+        if (a && b) {
+          const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy);
+          if (L < 2500 && !(Math.max(a[0], b[0]) < -10 || Math.min(a[0], b[0]) > W + 10 || Math.max(a[1], b[1]) < -10 || Math.min(a[1], b[1]) > H + 10)) {
+            const g2 = gap * (1 + Math.min(1.5, (a[2] + b[2]) / 8000)), m = Math.max(1, Math.ceil(L / g2)), f = it * fog((a[2] + b[2]) / 2) * g2 / 2.4;
+            for (let k = 0; k < m; k++) { const X = a[0] + dx * k / m, Y = a[1] + dy * k / m; if (X > -4 && X < W + 4 && Y > -4 && Y < H + 4) r.pushDot(n++, X, Y, col[0], col[1], col[2], f); }
+          }
+        }
+        a = b;
+      }
+    };
+    const fx = Math.sin(cam.yaw), fz = Math.cos(cam.yaw), rxv = fz, rzv = -fx;
+    const world = (d, sd) => [cam.x + fx * d + rxv * sd, cam.z + fz * d + rzv * sd];
+    // the land: rows across the view and lines running ahead, coarser with distance; snow on high ground
+    const grass = [0.72, 0.85, 0.62].map((q, k) => q * 0.7 + cold[k] * 0.3), snow = [0.95, 0.97, 1];
+    if (this.Ls > 0.02) {
+      const it = C.LAND_INT * this.Ls * (0.6 + 0.4 * E);
+      const along = cam.x * fx + cam.z * fz;                     // snap rows to the ground so they don't swim
+      for (const [d0, d1, step] of [[0, 2500, 110], [2500, 7000, 300], [7000, 18000, 800]]) {
+        for (let d = Math.ceil((along + d0) / step) * step - along; d < d1; d += step) {
+          const half = 400 + d * 1.0, row = [];
+          for (let k = -20; k <= 20; k++) { const [x, z] = world(d, half * k / 20); const h = this.H(x, z); row.push([x, h, z]); }
+          poly(row, grass, it);
+        }
+      }
+      const side = cam.x * rxv + cam.z * rzv;
+      for (const [d0, d1, step] of [[0, 3000, 160], [3000, 18000, 700]]) {
+        for (let sd = Math.ceil((side - d1) / step) * step - side; sd < d1; sd += step) {
+          const col = [];
+          for (let d = d0; d <= d1; d += (d1 - d0) / 24) { if (Math.abs(sd) > 400 + d * 1.0) continue; const [x, z] = world(d, sd); col.push([x, this.H(x, z), z]); }
+          if (col.length > 1) poly(col, grass, it * 0.7);
+        }
+      }
+      // mountain detail: ridge lines with snow above the snow line
+      if (this.mH > 0.02) for (let d = 3000; d < 18000; d += 700) {
+        const half = 400 + d, row = [];
+        for (let k = -30; k <= 30; k++) { const [x, z] = world(d, half * k / 30); row.push([x, this.H(x, z), z]); }
+        for (let q = 1; q < row.length; q++) if (row[q][1] > 500 || row[q - 1][1] > 500) poly([row[q - 1], row[q]], snow, it * 2 * Math.min(1, Math.max(row[q][1], row[q - 1][1]) / 1400));
+      }
+      // grass: short blades near you, swaying in rolling waves of wind
+      const wave = (x, z) => Math.sin((x * this.wx + z * this.wz) * 0.004 - t * (2 + 2 * this.gust)) * (6 + 10 * this.gust + 6 * C.WIND);
+      const gcell = 60, nb = 40;
+      for (let a = 0; a < nb; a++) for (let b = -nb; b < nb; b++) {
+        const gx = Math.floor(cam.x / gcell) * gcell + b * gcell, gz = Math.floor(cam.z / gcell) * gcell + a * gcell * 1.6 * Math.sign(fz || 1);
+        const jx = gx + hash2(gx, gz) * gcell, jz = gz + hash2(gz, gx) * gcell, h = this.H(jx, jz), sw = wave(jx, jz);
+        poly([[jx, h, jz], [jx + this.wx * sw, h + 22, jz + this.wz * sw]], grass, it * 1.6);
+      }
+    }
+    // camps of gers and grazing herds (placed by a hash of the land, so they're always in the same places)
+    const lifeIt = C.LIFE_INT * this.Ll;
+    if (lifeIt > 0.01) {
+      const cs = 2600, ci0 = Math.floor((cam.x - 9000) / cs), ci1 = Math.floor((cam.x + 9000) / cs), cj0 = Math.floor((cam.z - 2000) / cs), cj1 = Math.floor((cam.z + 12000) / cs);
+      const ger = [0.95, 0.93, 0.88], beast = hot.map(q => 0.55 + 0.45 * q);
+      for (let ci = ci0; ci <= ci1; ci++) for (let cj = cj0; cj <= cj1; cj++) {
+        const hh = hash2(ci, cj), cx = (ci + 0.5) * cs, cz = (cj + 0.5) * cs;
+        if ((cx - cam.x) * fx + (cz - cam.z) * fz < -200) continue;
+        if (hh < 0.35) {                                        // a camp of gers: round walls and a cone roof
+          const nG = 1 + Math.floor(hash2(cj, ci) * 4);
+          for (let g = 0; g < nG; g++) {
+            const gx = cx + (hash2(ci + g, cj) - 0.5) * 400, gz = cz + (hash2(ci, cj + g) - 0.5) * 400, gh = this.H(gx, gz), R = 38, wall = 26, roof = 22;
+            const ring = (rad, y) => { const p = []; for (let k = 0; k <= 16; k++) { const a = k / 16 * 2 * Math.PI; p.push([gx + Math.cos(a) * rad, gh + y, gz + Math.sin(a) * rad]); } return p; };
+            poly(ring(R, 0), ger, lifeIt); poly(ring(R, wall), ger, lifeIt);
+            for (let k = 0; k < 8; k++) { const a = k / 8 * 2 * Math.PI, ex = Math.cos(a) * R, ez = Math.sin(a) * R; poly([[gx + ex, gh, gz + ez], [gx + ex, gh + wall, gz + ez], [gx, gh + wall + roof, gz]], ger, lifeIt * 0.8); }
+          }
+        }
+        if (hash2(cj * 3, ci * 7) < 0.5) {                     // a herd: horses, yaks or sheep, grazing and drifting
+          const kind = Math.floor(hash2(ci * 5, cj * 5) * 3), nA = 8 + Math.floor(hash2(ci, cj * 9) * 22);
+          const hx = cx + 700 * Math.sin(t * 0.01 + ci), hz = cz + 700 * Math.cos(t * 0.012 + cj), dir = hash2(ci * 2, cj * 2) * 6.28 + 0.2 * Math.sin(t * 0.05);
+          const len = [44, 40, 24][kind], tall = [30, 24, 16][kind];
+          for (let k = 0; k < nA; k++) {
+            const ax = hx + (hash2(k, ci) - 0.5) * 500 + Math.sin(t * 0.08 + k) * 20, az = hz + (hash2(cj, k) - 0.5) * 500 + Math.cos(t * 0.07 + k) * 20;
+            const d = (ax - cam.x) * fx + (az - cam.z) * fz; if (d < 30 || d > 9000) continue;
+            const g0 = this.H(ax, az), ux = Math.cos(dir + k * 0.3), uz = Math.sin(dir + k * 0.3), graze = 0.5 + 0.5 * Math.sin(t * 0.4 + k);
+            const rump = [ax - ux * len / 2, g0 + tall, az - uz * len / 2], sh = [ax + ux * len / 2, g0 + tall, az + uz * len / 2];
+            const head = [sh[0] + ux * len * 0.35, g0 + tall * (1.3 - 1.1 * graze), sh[2] + uz * len * 0.35];
+            poly([rump, sh, head], beast, lifeIt);
+            const step = Math.sin(t * 2 + k) * len * 0.12;
+            for (const [p, sgn] of [[rump, 1], [sh, -1]]) for (const o of [-6, 6]) poly([[p[0] - uz * o, p[1], p[2] + ux * o], [p[0] - uz * o + ux * step * sgn, g0, p[2] + ux * o + uz * step * sgn]], beast, lifeIt * 0.8);
+          }
+        }
+      }
+    }
+    // data clouds: long streaks stretched by the wind
+    if (this.Lc > 0.02) for (const c of this.clouds) {
+      const ca = Math.cos(c.ang), sa = Math.sin(c.ang), it = 0.28 * C.CLOUDS * this.Lc * (0.6 + 0.4 * E);
+      for (const [u, w, h, len, g] of c.parts) {
+        if (g >= 0) continue;
+        const x = c.x + ca * u - sa * w, z = c.z + sa * u + ca * w, y = c.y + h;
+        poly([[x - ca * len / 2, y, z - sa * len / 2], [x, y, z], [x + ca * len / 2, y, z + sa * len / 2]], [0.88, 0.92, 1], it, 3);
+      }
+    }
+    // data wind: trails behind each character, longer in gusts
+    const sp = (st, ss) => { const w = st.A * Math.sin(ss * st.k + st.ph), x = st.ox + Math.cos(st.h) * ss - Math.sin(st.h) * w, z = st.oz + Math.sin(st.h) * ss + Math.cos(st.h) * w; return [x, this.H(x, z) + st.lift + 20 * Math.sin(ss * 0.003), z]; };
+    if (this.Lw > 0.02) for (const st of this.streams) for (let q = 0; q < st.n; q += 2) {
+      const ss = st.s0 - q * 40; if (ss < 0 || ss > st.L) continue;
+      poly([sp(st, ss), sp(st, Math.max(0, ss - 120 * (1 + this.gust)))], acc.map(z => 0.5 + 0.5 * z), 0.25 * this.Lw, 3);
+    }
+    // birds: eagles alongside, cranes in V formation, larks
+    const birdIt = C.BIRD_INT * this.Lb;
+    if (birdIt > 0.01) {
+      const gold = [1, 0.85, 0.55];
+      for (const e of this.eagles) {
+        const d = e.ahead + 120 * Math.sin(t * 0.13 + e.ph), sd = e.side * (380 + 140 * Math.sin(t * 0.09 + e.ph)), up = e.up + 60 * Math.sin(t * 0.21 + e.ph) - 260 * Math.sin(Math.min(1, e.dive) * Math.PI);
+        const [ex, ez] = world(d, sd), ey = cam.y + up, flap = e.flap > 0 ? Math.sin(e.flap * 14) * 0.5 : 0.08 * Math.sin(t * 0.8 + e.ph), bank = 0.25 * Math.sin(t * 0.13 + e.ph);
+        const span = 120, fwd = [fx, fz], right = [rxv, rzv];
+        const wing = side => {                                  // a broad wing with fingered primary feathers
+          const lift = Math.sin(flap + bank * side) * span * 0.35, o = side * span;
+          const tip = [ex + right[0] * o, ey + lift, ez + right[1] * o], mid = [ex + right[0] * o * 0.45, ey + lift * 0.4 + 6, ez + right[1] * o * 0.45];
+          poly([[ex + fwd[0] * 10, ey, ez + fwd[1] * 10], mid, tip], gold, birdIt);
+          poly([tip, [mid[0] - fwd[0] * 26, mid[1], mid[2] - fwd[1] * 26], [ex - fwd[0] * 14, ey, ez - fwd[1] * 14]], gold, birdIt * 0.7);
+          for (let k = 0; k < 4; k++) { const f = 0.82 + k * 0.05; poly([[ex + right[0] * o * f - fwd[0] * k * 6, ey + lift * f, ez + right[1] * o * f - fwd[1] * k * 6], [ex + right[0] * o * (f + 0.12) - fwd[0] * (k * 6 + 14), ey + lift * (f + 0.1), ez + right[1] * o * (f + 0.12) - fwd[1] * (k * 6 + 14)]], gold, birdIt * 0.6); }
+        };
+        wing(1); wing(-1);
+        poly([[ex + fwd[0] * 30, ey + 2, ez + fwd[1] * 30], [ex - fwd[0] * 40, ey, ez - fwd[1] * 40], [ex - fwd[0] * 55 + right[0] * 14, ey, ez - fwd[1] * 55 + right[1] * 14], [ex - fwd[0] * 55 - right[0] * 14, ey, ez - fwd[1] * 55 - right[1] * 14], [ex - fwd[0] * 40, ey, ez - fwd[1] * 40]], gold, birdIt);
+      }
+      for (const c of this.cranes) {
+        const sp2 = Math.hypot(c.vx, c.vz), ux = c.vx / sp2, uz = c.vz / sp2, px = -uz, pz = ux;
+        for (let k = 0; k < c.n; k++) {
+          const rank = Math.ceil(k / 2), side = k % 2 ? 1 : -1, bx = c.x - ux * rank * 70 + px * side * rank * 55, bz = c.z - uz * rank * 70 + pz * side * rank * 55, by = c.y + Math.sin(c.ph + k) * 6;
+          const fl = Math.sin(c.ph * 1.0 + k * 0.4) * 14;
+          poly([[bx + px * 40, by + fl, bz + pz * 40], [bx, by, bz], [bx - px * 40, by + fl, bz - pz * 40]], [0.9, 0.92, 0.95], birdIt * 0.7);
+          poly([[bx + ux * 30, by, bz + uz * 30], [bx - ux * 30, by, bz - uz * 30]], [0.9, 0.92, 0.95], birdIt * 0.6);
+        }
+      }
+      for (const l of this.larks) {
+        const fl = Math.sin(l.age * 30 + l.ph) * 6, f = Math.min(1, (5 - l.age) / 1.5);
+        poly([[l.x - 9, l.y + fl, l.z], [l.x, l.y, l.z], [l.x + 9, l.y + fl, l.z]], l.col, birdIt * 0.9 * f);
+      }
+    }
+    const D = r.pDots;
+    gl.bindVertexArray(r.dotVao); gl.bindBuffer(gl.ARRAY_BUFFER, r.dotBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, r.dots.subarray(0, n * 6), gl.STREAM_DRAW);
+    gl.useProgram(D.p); gl.uniform1f(D.u.u_mult, s);
+    gl.uniform2f(D.u.u_center, W / 2, H / 2); gl.uniform2f(D.u.u_rot, 1, 0); gl.uniform1f(D.u.u_zoom, 1); gl.uniform2f(D.u.u_world, W, H);
+    gl.drawArrays(gl.POINTS, 0, n);
+    // characters: the data wind and the characters inside the clouds
+    let m = 0; const I = this.inst;
+    const put = (X, Y, Z, size, g, c, it) => { if ((m + 1) * 11 <= I.length) { I.set([X, Y, Z, 0, 1, size, g, c[0], c[1], c[2], it], m * 11); m++; } };
+    if (this.Lw > 0.02) for (const st of this.streams) for (let q = 0; q < st.n; q++) {
+      const ss = st.s0 - q * 40; if (ss < 0 || ss > st.L) continue;
+      const fade = Math.min(1, ss / 300, (st.L - ss) / 300), [X, Y, Z] = sp(st, ss);
+      put(X, Y, Z, 30, st.chars[q % 48], q ? [0.88, 0.95, 0.85] : [1, 1, 1], 0.7 * this.Lw * fade * (q ? 1 - 0.5 * q / st.n : 1.6));
+    }
+    if (this.Lc > 0.02) for (const c of this.clouds) { const ca = Math.cos(c.ang), sa = Math.sin(c.ang); for (const [u, w, h, , g] of c.parts) if (g >= 0) put(c.x + ca * u - sa * w, c.y + h, c.z + sa * u + ca * w, 60, g, [0.9, 0.94, 1], 0.5 * C.CLOUDS * this.Lc); }
+    const G = this.G.glyph;
+    gl.bindVertexArray(this.G.vao); gl.bindBuffer(gl.ARRAY_BUFFER, this.G.buf);
+    gl.useProgram(G.p);
+    gl.uniform3f(G.u.u_cam, cam.x, cam.y, cam.z); gl.uniform1f(G.u.u_pitch, cam.pitch); gl.uniform1f(G.u.u_yaw, cam.yaw); gl.uniform1f(G.u.u_roll, cam.roll);
+    gl.uniform1f(G.u.u_f, C.FOCAL); gl.uniform2f(G.u.u_cs, W / 2, H / 2); gl.uniform2f(G.u.u_world, W, H); gl.uniform1f(G.u.u_fog, 0.00006);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.G.tex); gl.uniform1i(G.u.u_atlas, 0);
+    gl.bufferData(gl.ARRAY_BUFFER, I.subarray(0, m * 11), gl.STREAM_DRAW);
+    gl.uniform1f(G.u.u_screen, 0); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, m);
+    gl.uniform1f(G.u.u_roll, 0);                                  // other visualisers share this program
+    gl.bindVertexArray(null); gl.disable(gl.BLEND);
+    this.points = n;
+    r.compose({ F, frame: i, bg: [0, 0, 0], glow: C.GLOW, exposure: C.EXPOSURE, fadeIn: C.FADE_IN, fadeOut: C.FADE_OUT });
+  }
+  stats() { return [["flight", STEPPE_STYLES[this.style % 4] || "–"], ["speed", Math.round(this.speed || 0)], ["altitude", Math.round(this.alt)], ["points", (this.points || 0).toLocaleString()]]; }
+}
+
 // =========================== VISUALISER MENU ===============================
 // Every visualiser shares the analysis, playback, recording and glow pass, and brings its own
 // physics, drawing, settings and "how the music drives it" table.
@@ -3601,6 +3914,24 @@ const VISUALISERS = [
     ],
     layers: ["ice", "aurora", "snow", "whales"],
     create: F => new AuroraShelf(F),
+  },
+  {
+    id: "steppe-flight", name: "Steppe Flight", status: "On trial",
+    blurb: "Flying like an eagle over the Mongolian steppe, gers, herds and rising mountains",
+    config: STEPPE, sliders: STEPPE_SLIDERS, particles: false,
+    hints: { sub: "dip", kick: "gust", snare: "eagle", lowmid: "bank", hat: "glint", centroid: "–", melody: "larks" },
+    mapping: [
+      ["Story energy", "Flight speed: a glide in the intro, racing over the land after the drop"],
+      ["Kick", "A gust of data wind rolls through the grass and speeds the ribbons of characters"],
+      ["Sub + bass", "Pulls you down towards the land (the Swoops slider sets how much)"],
+      ["Melody", "A flock of larks bursts up out of the grass, tinted with the note's colour"],
+      ["Clap", "One of the eagles flying with you flaps and dives"],
+      ["Low mids", "You bank and turn"],
+      ["Story effects", "Steppe, mountains (they rise out of the land), gers & herds, birds, data clouds and data wind"],
+      ["Story variation", "The flight: skimming the grass, an eagle's cruise, a high soar through the clouds, or swooping climbs and dives"],
+    ],
+    layers: ["steppe", "mountains", "life", "birds", "clouds", "wind"],
+    create: F => new SteppeFlight(F),
   },
 ];
 VISUALISERS.forEach(v => { v.defaults = JSON.parse(JSON.stringify(v.config)); });
@@ -3783,7 +4114,8 @@ function renderSectionEditor() {
     chips.appendChild(b);
   }
   $("seVar").value = String(sec.variation);
-  $("seVarNote").textContent = app.vis.id === "aurora-shelf" ? "Changes the view: skimming the ice, aerial, a sky gaze from the sea, or circling an iceberg."
+  $("seVarNote").textContent = app.vis.id === "steppe-flight" ? "Changes the flight: skimming the grass, an eagle's cruise, a high soar through the clouds, or swooping climbs and dives."
+    : app.vis.id === "aurora-shelf" ? "Changes the view: skimming the ice, aerial, a sky gaze from the sea, or circling an iceberg."
     : app.vis.id === "data-forest" ? "Changes the view: a walk among the trees, an orbit from outside, a worm's eye view up into the canopy, or above the treetops."
     : app.vis.id === "wire-city" ? "Changes the camera: orbit, street level, plan view or rising spiral; and the accent colour."
     : app.vis.id === "signal-plane" ? "Changes the cable layout (lanes, diagonals, meanders, fan), the objects below, and the accent colour."
@@ -3812,7 +4144,8 @@ function drawStory() {
                       streams: "#e8ecff", field: "#8a93b8", wireframes: "#7fd1ff", smoke: "#ff7a9a",
                       city: "#cfd8ff", data: "#7ff0d8", sky: "#b48cff", scans: "#ffd36b",
                       trees: "#9be37a", leaves: "#ffb36b", rain: "#7ff0d8", beings: "#ff9ec4",
-                      ice: "#cfe8ff", aurora: "#7fffb0", snow: "#ffffff", whales: "#7fd1ff" };
+                      ice: "#cfe8ff", aurora: "#7fffb0", snow: "#ffffff", whales: "#7fd1ff",
+                      steppe: "#b8d98a", mountains: "#e8eeff", life: "#ffd9a8", birds: "#ffd36b", clouds: "#cfd8ff", wind: "#7ff0d8" };
   S.sections.forEach((sec, s) => {
     const x0 = X(sec.start), x1 = X(sec.end);
     if (s === app.selSec) { g.fillStyle = photon; g.globalAlpha = 0.14; g.fillRect(x0, 0, x1 - x0, h); g.globalAlpha = 1; }

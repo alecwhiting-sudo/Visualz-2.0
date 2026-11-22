@@ -27,6 +27,7 @@ A link ending in `#ink-tide` (or any visualiser id) opens that visualiser direct
 | 7 | Wire City (`wire-city`) | On trial | Procedural wireframe city between three planes (street dot grid, rippling point-cloud sky membrane, sweeping scan planes); melody packets beam rooftop → membrane → across as characters → down into another tower; camera modes per variation |
 | 8 | Data Forest (`data-forest`) | On trial | Procedural branching wireframe trees bent by a rolling wind field (height-weighted sway); glyph data rain with ground splashes; leaves that tear loose on claps; gentle seahorse-like light beings drifting slowly on the trunks, swaying in the wind; camera views per variation |
 | 9 | Aurora Shelf (`aurora-shelf`) | On trial | Polar night: wireframe ice plateau and cliff, swell-line sea, bobbing icebergs, aurora curtains lit by melody, data snow, kick cracks that fork across the ice, wireframe whales (a motion slider up to breaching) that blow spouts on claps, schooling fish shoals, and streams of characters that streak at the top of their slider |
+| 10 | Steppe Flight (`steppe-flight`) | On trial | Eagle-speed flight over procedural Mongolian steppe (LOD terrain grid, wind-wave grass), gers and grazing herds placed by hashing the land, mountains that rise with the story, eagles alongside, cranes in V formation, larks on melody notes, data wind ribbons and long streaky data clouds |
 
 ### Story
 
