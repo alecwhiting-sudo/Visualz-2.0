@@ -25,7 +25,7 @@ A link ending in `#ink-tide` (or any visualiser id) opens that visualiser direct
 | 5 | Deep Voyage (`deep-voyage`) | On trial | 3-D perspective flight; speed from the story energy; noise-tunnel gas clouds; shaded planets with rings; black holes with lens-equation light bending and accretion discs |
 | 6 | Signal Plane (`signal-plane`) | On trial | Perspective data plane: instanced glyph streams race along 12 cables (one per note), split and reverse on claps; ray-cast plane shader for grid, cables, scan lines and laser-sheet smoke; wireframe globes, ringed planets, moons and gravity wells pass beneath |
 | 7 | Wire City (`wire-city`) | On trial | Procedural wireframe city between three planes (street dot grid, rippling point-cloud sky membrane, sweeping scan planes); melody packets beam rooftop → membrane → across as characters → down into another tower; camera modes per variation |
-| 8 | Data Forest (`data-forest`) | On trial | Procedural branching wireframe trees bent by a rolling wind field (height-weighted sway); glyph data rain with ground splashes; leaves that tear loose on claps; light beings on trunks with verlet-chain tendrils in the wind; camera views per variation |
+| 8 | Data Forest (`data-forest`) | On trial | Procedural branching wireframe trees bent by a rolling wind field (height-weighted sway); glyph data rain with ground splashes; leaves that tear loose on claps; gentle seahorse-like light beings drifting slowly on the trunks, swaying in the wind; camera views per variation |
 
 ### Story
 
