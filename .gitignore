@@ -1,0 +1,10 @@
+# Python / numba compile caches
+__pycache__/
+*.pyc
+
+# Render outputs and intermediates
+features.npz
+*.mp4
+*.png
+part*.log
+parts.txt
