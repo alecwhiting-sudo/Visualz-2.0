@@ -3261,8 +3261,9 @@ class AuroraShelf {
       for (let k = 0; k < 130; k++) {
         const u = k / 130, X = c.x0 + u * 7000, wave = 260 * Math.sin(u * 7 + t * 0.35 + c.ph) + 120 * Math.sin(u * 19 - t * 0.6), Z = c.z + wave;
         const y0 = 900 + 160 * Math.sin(u * 5 + t * 0.2 + c.ph), y1 = y0 + 1000 + 700 * (0.5 + 0.5 * Math.sin(u * 11 + t * 0.5 + c.ph)) * (0.6 + 0.4 * c.lit);
-        const a = P(X, y0, Z), b = P(X, y1, Z); if (!a || !b) continue;
-        const m = Math.max(2, Math.ceil(Math.abs(b[1] - a[1]) / 5)), f = base * fog(a[2] * 0.5) * 2;
+        const a = P(X, y0, Z), b = P(X, y1, Z); if (!a || !b || a[2] < 400) continue;
+        const near = Math.min(1, (a[2] - 400) / 800);                       // fade rays the camera is almost inside
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]), m = Math.max(2, Math.min(90, Math.ceil(len / 5))), f = base * fog(a[2] * 0.5) * 2 * (len / m / 5) * near;
         for (let q = 0; q < m; q++) { const uu = q / m, fall = uu < 0.08 ? uu / 0.08 : Math.pow(1 - (uu - 0.08) / 0.92, 1.6); r.pushDot(n++, a[0] + (b[0] - a[0]) * uu, a[1] + (b[1] - a[1]) * uu, col[0], col[1], col[2], f * fall * 0.5); }
       }
     }
