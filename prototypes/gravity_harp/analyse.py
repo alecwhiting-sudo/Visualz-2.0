@@ -87,9 +87,9 @@ def hits(env, delta, wait_s):
                                  post_avg=10, delta=delta,
                                  wait=int(wait_s * sr / HOP))
     tv = np.round(t_audio[idx] * a.fps).astype(int)
-    tv = tv[(tv >= 0) & (tv < nframes)]
-    strength = norm(env)[idx][: len(tv)]
-    return tv, strength
+    ok = (tv >= 0) & (tv < nframes)          # keep hit times and strengths aligned
+    strength = norm(env)[idx][ok]
+    return tv[ok], strength
 
 
 def decay_env(hit_frames, strength, decay):
@@ -141,6 +141,11 @@ sync = np.vstack([librosa.util.normalize(mfcc, axis=1),
                   librosa.util.normalize(chroma, axis=1)])
 beat_hop = int(2.0 * sr / HOP)  # ~2 s blocks for robust segmentation
 blocks = librosa.util.sync(sync, np.arange(0, sync.shape[1], beat_hop))
+# short clips have fewer ~2 s blocks than requested sections
+n_sec = int(max(1, min(a.sections, blocks.shape[1])))
+if n_sec < a.sections:
+    print(f"short clip: using {n_sec} sections instead of {a.sections}")
+a.sections = n_sec
 bounds = librosa.segment.agglomerative(blocks, a.sections)
 bound_t = bounds * beat_hop * HOP / sr
 sec = np.searchsorted(bound_t, t_video, side="right") - 1

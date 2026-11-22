@@ -69,8 +69,8 @@ PALETTES = [
 FADE_IN, FADE_OUT = 1.5, 3.0
 # ==========================================================================
 
-FPS = 30
-DT = 1.0 / FPS
+FPS = 30            # overwritten from features.npz in main(), so analysis and
+DT = 1.0 / FPS      # render always agree on the frame rate
 
 
 def hsv(h, s, v):
@@ -481,9 +481,14 @@ def main():
     ap.add_argument("--start", type=float, default=0.0)
     ap.add_argument("--end", type=float, default=None)
     ap.add_argument("--stills", default=None, help="comma list of seconds -> PNGs")
+    ap.add_argument("--crf", type=int, default=19,
+                    help="H.264 quality: 19 = master (~3.7 MB/s), 25 = share (~1 MB/s)")
     a = ap.parse_args()
 
     F = dict(np.load(a.features))
+    global FPS, DT
+    FPS = int(F["fps"])
+    DT = 1.0 / FPS
     n = int(F["nframes"])
     sc = Scene(F)
 
@@ -505,7 +510,7 @@ def main():
     ff = subprocess.Popen(
         ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
          "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-", "-c:v", "libx264",
-         "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p", "-g", "60", tmp],
+         "-preset", "veryfast", "-crf", str(a.crf), "-pix_fmt", "yuv420p", "-g", "60", tmp],
         stdin=subprocess.PIPE)
     warm = max(0, f0 - 15)
     for i in range(f1):

@@ -1,0 +1,1269 @@
+<title>Gravity Harp</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Manrope:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a 9:16 stage on the left (top on phones), a narrow instrument rack on the right (below on phones).
+   Deliberately single-theme dark: the visual is light on black and the UI recedes around it. */
+:root {
+  --void: #06070d;
+  --rack: #0e1019;
+  --rack-2: #151827;
+  --line: #242840;
+  --text: #e9e9f4;
+  --muted: #8d90ad;
+  --photon: #f2bd74;
+  --photon-ink: #1a1206;
+  --rec: #ff4d6d;
+  --font-display: "Unbounded", "Avenir Next", system-ui, sans-serif;
+  --font-body: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  background: var(--void); color: var(--text); font-family: var(--font-body); font-size: 15px; line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 16px 32px;
+}
+.app { display: grid; gap: 20px; max-width: 1180px; margin: 0 auto; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) {
+  .app { grid-template-columns: minmax(0, 1fr) 380px; align-items: start; }
+  .stage-col { position: sticky; top: 16px; }
+}
+header.brand { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: 1.35rem; letter-spacing: 0.01em; margin: 0; text-wrap: balance; }
+h1 small { font-family: var(--font-mono); font-weight: 400; font-size: 0.7rem; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; margin-left: 8px; }
+.tag { font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+
+.stage-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.stage {
+  position: relative; aspect-ratio: 9 / 16; width: min(100%, calc(82vh * 9 / 16)); max-width: 100%;
+  margin: 0 auto; background: #000; border-radius: 14px; overflow: hidden; border: 1px solid var(--line);
+}
+.stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.overlay {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; background: rgba(6, 7, 13, 0.72); text-align: center; padding: 24px; font-family: var(--font-mono); font-size: 0.8rem; color: var(--muted);
+}
+.overlay strong { font-family: var(--font-display); font-weight: 500; color: var(--text); font-size: 0.95rem; }
+.bar { width: 70%; height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0; background: var(--photon); transition: width 0.15s; }
+.rec-badge {
+  position: absolute; top: 12px; left: 12px; display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 99px;
+  background: rgba(0,0,0,0.55); font-family: var(--font-mono); font-size: 0.72rem; color: var(--text);
+}
+.rec-badge::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--rec); animation: blink 1s infinite; }
+@keyframes blink { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .rec-badge::before { animation: none; } }
+
+.transport { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 10px; align-items: center; width: min(100%, calc(82vh * 9 / 16)); margin: 0 auto; }
+.timeline { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.track { position: relative; height: 18px; }
+.track .rail { position: absolute; left: 0; right: 0; top: 8px; height: 2px; background: var(--line); }
+.track .fill { position: absolute; left: 0; top: 8px; height: 2px; background: var(--photon); width: 0; }
+.track .sec { position: absolute; top: 3px; width: 1px; height: 12px; background: var(--muted); opacity: 0.6; }
+.times { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+button, .btn {
+  font: 600 0.85rem var(--font-body); color: var(--text); background: var(--rack-2); border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px 14px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 42px; -webkit-tap-highlight-color: transparent;
+}
+button:hover:not(:disabled), .btn:hover { border-color: var(--muted); }
+button:focus-visible, .btn:focus-within, select:focus-visible, input:focus-visible { outline: 2px solid var(--photon); outline-offset: 2px; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.primary { background: var(--photon); color: var(--photon-ink); border-color: var(--photon); }
+button.round { width: 48px; height: 48px; padding: 0; border-radius: 50%; }
+button.rec { border-color: color-mix(in srgb, var(--rec) 55%, var(--line)); }
+button.rec.on { background: var(--rec); color: #fff; border-color: var(--rec); }
+svg.i { width: 18px; height: 18px; fill: currentColor; }
+
+.rack { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.panel { background: var(--rack); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.panel h2 { font-family: var(--font-mono); font-weight: 600; font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin: 0; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.row > * { flex: 1 1 auto; }
+.file-name { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text); overflow-wrap: anywhere; }
+.note { font-size: 0.8rem; color: var(--muted); margin: 0; }
+.note b { color: var(--text); font-weight: 600; }
+input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+.meters { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.meter { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
+.meter .well { height: 54px; background: var(--rack-2); border-radius: 6px; position: relative; overflow: hidden; }
+.meter .well i { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: var(--photon); opacity: 0.85; }
+.meter span { font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted); text-align: center; letter-spacing: 0.04em; }
+.meter small { font-size: 0.6rem; color: var(--muted); text-align: center; opacity: 0.7; }
+.chroma { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px; }
+.chroma i { aspect-ratio: 1; border-radius: 50%; opacity: 0.15; max-width: 100%; }
+.chroma-labels { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px; font-family: var(--font-mono); font-size: 0.58rem; color: var(--muted); text-align: center; }
+
+.ctl { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr) 3rem; gap: 10px; align-items: center; }
+.ctl label { font-size: 0.82rem; }
+.ctl output { font-family: var(--font-mono); font-size: 0.75rem; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+input[type=range] { width: 100%; accent-color: var(--photon); }
+select { font: 600 0.82rem var(--font-body); background: var(--rack-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px; min-height: 38px; width: 100%; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pair label { display: flex; flex-direction: column; gap: 4px; font-size: 0.75rem; color: var(--muted); }
+
+.stats { font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 14px; font-variant-numeric: tabular-nums; }
+.stats b { color: var(--text); font-weight: 400; }
+details summary { cursor: pointer; font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+table.map { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-top: 10px; }
+table.map td { padding: 6px 0; border-top: 1px solid var(--line); vertical-align: top; }
+table.map td:first-child { color: var(--photon); font-family: var(--font-mono); font-size: 0.72rem; width: 34%; padding-right: 10px; }
+.save-out { display: flex; flex-direction: column; gap: 8px; }
+</style>
+
+<div class="app">
+  <div class="stage-col">
+    <header class="brand">
+      <h1>Gravity Harp <small>Visualz · POC</small></h1>
+      <span class="tag">1080 × 1920 · 30 fps</span>
+    </header>
+    <div class="stage" id="stage">
+      <canvas id="gl" width="540" height="960" aria-label="Visualiser output"></canvas>
+      <div class="overlay" id="overlay">
+        <strong id="ovTitle">Loading the demo track</strong>
+        <span id="ovMsg">Listening for kicks, snares, hats and chords…</span>
+        <div class="bar"><i id="ovBar"></i></div>
+      </div>
+      <div class="rec-badge" id="recBadge" hidden>REC <span id="recTime">0:00</span></div>
+    </div>
+    <div class="transport">
+      <button class="round primary" id="playBtn" aria-label="Play" disabled>
+        <svg class="i" viewBox="0 0 24 24" id="playIcon"><path d="M8 5v14l11-7z"/></svg>
+      </button>
+      <button class="round" id="restartBtn" aria-label="Restart from the beginning" disabled>
+        <svg class="i" viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/></svg>
+      </button>
+      <div class="timeline">
+        <div class="track" id="trackBar"><div class="rail"></div><div class="fill" id="fill"></div></div>
+        <div class="times"><span id="tNow">0:00</span><span id="tSec">section –</span><span id="tDur">0:00</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rack">
+    <section class="panel" aria-labelledby="h-track">
+      <h2 id="h-track">Track</h2>
+      <div class="row">
+        <label class="btn" for="file"><svg class="i" viewBox="0 0 24 24"><path d="M12 3v10.6A4 4 0 1 0 14 17V7h4V3h-6z"/></svg>Load MP3 or WAV</label>
+        <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg">
+        <button id="demoBtn">Demo track</button>
+      </div>
+      <div class="file-name" id="fileName">Demo: 40 s synth beat (intro, drop, breakdown, drop)</div>
+      <div class="stats" id="hits"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="h-export">
+      <h2 id="h-export">Export</h2>
+      <div class="row">
+        <button class="rec" id="recBtn" disabled><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></svg><span id="recLabel">Record video</span></button>
+        <button id="stillBtn" disabled><svg class="i" viewBox="0 0 24 24"><path d="M4 5h3l2-2h6l2 2h3v14H4zm8 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10z"/></svg>Save still</button>
+      </div>
+      <div class="save-out" id="saveOut" hidden>
+        <button class="primary" id="saveVidBtn">Save video</button>
+      </div>
+      <p class="note" id="recNote">Recording plays the whole track once, in real time, with sound. Keep this tab in front while it runs.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="h-hear">
+      <h2 id="h-hear">What it hears, right now</h2>
+      <div class="meters" id="meters"></div>
+      <div class="chroma" id="chroma"></div>
+      <div class="chroma-labels" id="chromaLabels"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="h-set">
+      <h2 id="h-set">Settings</h2>
+      <div id="sliders" style="display:flex;flex-direction:column;gap:10px"></div>
+      <div class="pair">
+        <label for="palSel">Palette<select id="palSel"></select></label>
+        <label for="partSel">Particles<select id="partSel">
+          <option value="12000">12,000 (light)</option>
+          <option value="24000">24,000</option>
+          <option value="34000" selected>34,000 (as Python)</option>
+        </select></label>
+      </div>
+      <div class="pair">
+        <label for="resSel">Render size<select id="resSel">
+          <option value="0.5">540 × 960 (fast)</option>
+          <option value="1">1080 × 1920 (full)</option>
+        </select></label>
+        <label for="resetBtn" style="justify-content:flex-end"><span>&nbsp;</span><button id="resetBtn">Reset settings</button></label>
+      </div>
+      <p class="note">Particle count and render size apply on the next play or record.</p>
+    </section>
+
+    <section class="panel">
+      <details>
+        <summary>How the music drives it</summary>
+        <table class="map">
+          <tr><td>Sub + bass</td><td>Mass of the central gravity well; the photon ring swells</td></tr>
+          <tr><td>Kick</td><td>Radial pressure blast from the core, plus a small camera punch-in</td></tr>
+          <tr><td>Snare</td><td>Expanding shockwave rings that shove particles</td></tr>
+          <tr><td>Low mids</td><td>Disk spin</td></tr>
+          <tr><td>Hats + air</td><td>Curl-noise turbulence and sparks thrown off the strings</td></tr>
+          <tr><td>12 pitch classes</td><td>12 vibrating strings (wave equation), coloured round the circle of fifths</td></tr>
+          <tr><td>Brightness</td><td>Warmth of the particle colours</td></tr>
+          <tr><td>Song sections</td><td>Palette changes; quiet sections loosen gravity into a halo</td></tr>
+        </table>
+      </details>
+      <div class="stats" id="perf"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+"use strict";
+// =========================== CONFIG ========================================
+// Same names and values as prototypes/gravity_harp/render.py. Sliders edit these live.
+const CONFIG = {
+  W: 1080, H: 1920, FPS: 30, SEED: 7,
+  N_PARTICLES: 34000, N_SPARKS: 4000,
+  STRING_NODES: 72, STRING_INNER: 150, STRING_OUTER: 820,
+  CENTER: [1080 * 0.5, 1920 * 0.47],
+  G_BASE: 1.6e7, G_BASS: 2.2e7, GRAVITY: 1.0, SOFTEN: 60,
+  KICK_PUSH: 280, KICK_RANGE: 380,
+  SNARE_SPEED: 950, SNARE_PUSH: 40, SNARE_WIDTH: 70,
+  TORQUE: 0.25, TURB: 55,
+  DISK_INNER: 90, DISK_SPREAD: 175, DISK_RESTORE: 2.0, DRAG: 1.6,
+  TRAIL: 0.80, EXPOSURE: 1.6, GLOW: 1.1, PARTICLE_INT: 0.15, STRING_INT: 1.6,
+  SPIN_BASE: 0.03, SPIN_ENERGY: 0.12,
+  FADE_IN: 1.5, FADE_OUT: 3.0,
+  SECTIONS: 8,
+  PALETTE_LOCK: -1,          // -1 = follow song sections
+};
+// Section palettes: [background, cold, hot, accent], linear RGB 0..1
+const PALETTES = [
+  [[0.010,0.012,0.035],[0.10,0.35,1.00],[1.00,0.45,0.85],[0.6,0.9,1.0]],
+  [[0.020,0.008,0.030],[0.55,0.15,1.00],[1.00,0.60,0.25],[1.0,0.8,0.6]],
+  [[0.004,0.018,0.025],[0.05,0.70,0.75],[0.75,1.00,0.85],[0.6,1.0,0.9]],
+  [[0.010,0.010,0.030],[0.25,0.30,1.00],[0.95,0.95,1.00],[0.8,0.8,1.0]],
+  [[0.025,0.006,0.015],[1.00,0.18,0.35],[1.00,0.85,0.40],[1.0,0.6,0.5]],
+  [[0.008,0.014,0.035],[0.15,0.55,1.00],[1.00,0.35,0.60],[0.7,0.9,1.0]],
+  [[0.018,0.008,0.032],[0.65,0.20,1.00],[0.30,1.00,0.90],[0.9,0.7,1.0]],
+  [[0.006,0.006,0.020],[0.30,0.40,0.80],[0.80,0.70,1.00],[0.7,0.7,0.9]],
+];
+const PALETTE_NAMES = ["Nebula","Ember","Lagoon","Moonlight","Solar","Aurora","Orchid","Dusk"];
+const SLIDERS = [
+  // key, label, min, max, step
+  ["GLOW", "Glow", 0, 2.5, 0.05],
+  ["TRAIL", "Trails", 0.5, 0.95, 0.01],
+  ["EXPOSURE", "Exposure", 0.6, 3, 0.05],
+  ["GRAVITY", "Gravity", 0.5, 1.6, 0.05],
+  ["KICK_PUSH", "Kick blast", 0, 600, 10],
+  ["SNARE_PUSH", "Snare shock", 0, 100, 2],
+  ["TURB", "Turbulence", 0, 150, 5],
+  ["SPIN_ENERGY", "Camera spin", 0, 0.4, 0.01],
+];
+const DEFAULTS = JSON.parse(JSON.stringify(CONFIG));
+const FPS = CONFIG.FPS, DT = 1 / FPS;
+// ===========================================================================
+
+// ---------- small utilities ----------
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function makeRng(seed) {
+  const u = mulberry32(seed);
+  const r = () => u();
+  r.normal = (mu = 0, sd = 1) => {
+    let a = 0; while (a === 0) a = u();
+    return mu + sd * Math.sqrt(-2 * Math.log(a)) * Math.cos(2 * Math.PI * u());
+  };
+  r.gamma = (k, theta) => {           // Marsaglia–Tsang, k >= 1
+    const d = k - 1 / 3, c = 1 / Math.sqrt(9 * d);
+    for (;;) {
+      let x, v;
+      do { x = r.normal(); v = 1 + c * x; } while (v <= 0);
+      v = v * v * v; const uu = u();
+      if (Math.log(uu) < 0.5 * x * x + d - d * v + d * Math.log(v)) return d * v * theta;
+    }
+  };
+  return r;
+}
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const fmtTime = s => { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+const tick = () => new Promise(r => setTimeout(r, 0));
+function hsv(h, s, v) {
+  const i = Math.floor(h * 6) % 6, f = h * 6 - Math.floor(h * 6);
+  const p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+  return [[v,t,p],[q,v,p],[p,v,t],[p,q,v],[t,p,v],[v,p,q]][i];
+}
+// pitch class -> hue on the circle of fifths, so consonant notes sit nearby
+const STRING_COLORS = Array.from({ length: 12 }, (_, k) => hsv(((k * 7) % 12) / 12, 0.65, 1.0));
+const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+
+// =========================== AUDIO ANALYSIS ================================
+// Port of analyse.py: every feature is sampled once per video frame, 0..1.
+const SR = 22050, NFFT = 2048, HOP = 512;
+
+function makeFFT(n) {
+  const levels = Math.log2(n), rev = new Uint32Array(n);
+  for (let i = 0; i < n; i++) { let r = 0, x = i; for (let j = 0; j < levels; j++) { r = (r << 1) | (x & 1); x >>= 1; } rev[i] = r; }
+  const cs = new Float64Array(n / 2), sn = new Float64Array(n / 2);
+  for (let i = 0; i < n / 2; i++) { cs[i] = Math.cos(2 * Math.PI * i / n); sn[i] = Math.sin(2 * Math.PI * i / n); }
+  return (re, im) => {
+    for (let i = 0; i < n; i++) { const j = rev[i]; if (j > i) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; } }
+    for (let size = 2; size <= n; size <<= 1) {
+      const half = size >> 1, step = n / size;
+      for (let i = 0; i < n; i += size) {
+        for (let j = i, k = 0; j < i + half; j++, k += step) {
+          const l = j + half;
+          const tr = re[l] * cs[k] + im[l] * sn[k], ti = -re[l] * sn[k] + im[l] * cs[k];
+          re[l] = re[j] - tr; im[l] = im[j] - ti; re[j] += tr; im[j] += ti;
+        }
+      }
+    }
+  };
+}
+function percentile(x, p) {
+  const s = Float64Array.from(x).sort(); if (!s.length) return 0;
+  const pos = (s.length - 1) * p / 100, lo = Math.floor(pos), hi = Math.min(s.length - 1, lo + 1);
+  return s[lo] + (s[hi] - s[lo]) * (pos - lo);
+}
+function norm(x, lo = 5, hi = 99) {
+  const a = percentile(x, lo), b = percentile(x, hi), out = new Float32Array(x.length);
+  for (let i = 0; i < x.length; i++) out[i] = clamp((x[i] - a) / (b - a + 1e-9), 0, 1);
+  return out;
+}
+function smoothAR(x, attack = 0.6, release = 0.12) {
+  const out = new Float32Array(x.length); let v = 0;
+  for (let i = 0; i < x.length; i++) { const k = x[i] > v ? attack : release; v += (x[i] - v) * k; out[i] = v; }
+  return out;
+}
+function uniformFilter(x, size) {         // scipy uniform_filter1d, mode="reflect"
+  const n = x.length, out = new Float32Array(n), h = Math.floor(size / 2);
+  const at = i => { while (i < 0 || i >= n) { if (i < 0) i = -i - 1; if (i >= n) i = 2 * n - i - 1; } return x[i]; };
+  for (let i = 0; i < n; i++) { let s = 0; for (let k = -h; k < size - h; k++) s += at(i + k); out[i] = s / size; }
+  return out;
+}
+
+async function toMono22k(buf) {
+  const len = Math.ceil(buf.duration * SR);
+  const oc = new OfflineAudioContext(1, len, SR);
+  const src = oc.createBufferSource(); src.buffer = buf; src.connect(oc.destination); src.start();
+  return (await oc.startRendering()).getChannelData(0);
+}
+
+async function analyse(audioBuffer, onProgress) {
+  const y = await toMono22k(audioBuffer);
+  const dur = y.length / SR, nframes = Math.ceil(dur * FPS);
+  const nA = 1 + Math.floor(y.length / HOP), nb = NFFT / 2 + 1, binHz = SR / NFFT;
+  const fft = makeFFT(NFFT);
+  const win = new Float64Array(NFFT); for (let i = 0; i < NFFT; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / NFFT);
+  const re = new Float64Array(NFFT), im = new Float64Array(NFFT), mag = new Float32Array(nb);
+  const bin = hz => Math.round(hz / binHz);
+  const BANDS = { sub: [20, 60], bass: [60, 160], lowmid: [160, 500], mid: [500, 2000], presence: [2000, 6000], air: [6000, 11000] };
+  const bandKeys = Object.keys(BANDS);
+  const bandRaw = bandKeys.map(() => new Float32Array(nA));
+  const chromaA = Array.from({ length: 12 }, () => new Float32Array(nA));
+  const flat = new Float32Array(nA), cent = new Float32Array(nA), rms = new Float32Array(nA), harmA = new Float32Array(nA);
+  const ONSETS = { kick: [30, 150], snare: [1500, 5000], hat: [7000, 11000] };
+  const onsetKeys = Object.keys(ONSETS);
+  const flux = onsetKeys.map(() => new Float32Array(nA));
+  // pitch class of each bin (C2..C7), -1 = ignored
+  const pc = new Int8Array(nb).fill(-1);
+  for (let k = 1; k < nb; k++) { const f = k * binHz; if (f >= 65 && f <= 2100) pc[k] = ((Math.round(12 * Math.log2(f / 440)) + 9) % 12 + 12) % 12; }
+
+  function frameSpectrum(t) {
+    const c = t * HOP - NFFT / 2;          // centred frames, zero-padded edges (librosa center=True)
+    for (let i = 0; i < NFFT; i++) { const j = c + i; re[i] = (j >= 0 && j < y.length ? y[j] : 0) * win[i]; im[i] = 0; }
+    fft(re, im);
+    for (let k = 0; k < nb; k++) mag[k] = Math.hypot(re[k], im[k]);
+  }
+  // pass 1: band energies, chroma, flatness, centroid, rms, global peak
+  let maxMag = 1e-9;
+  for (let t = 0; t < nA; t++) {
+    frameSpectrum(t);
+    for (let b = 0; b < bandKeys.length; b++) {
+      const [lo, hi] = BANDS[bandKeys[b]]; let s = 0, n = 0;
+      for (let k = Math.ceil(lo / binHz); k < hi / binHz && k < nb; k++) { s += mag[k]; n++; }
+      bandRaw[b][t] = Math.log1p((n ? s / n : 0) * 50);
+    }
+    let lsum = 0, sum = 0, wsum = 0, hs = 0, hn = 0;
+    const ch = new Float64Array(12);
+    for (let k = 0; k < nb; k++) {
+      const m = mag[k], p = Math.max(m * m, 1e-10);
+      if (m > maxMag) maxMag = m;
+      lsum += Math.log(p); sum += p; wsum += k * binHz * m;
+      if (pc[k] >= 0) ch[pc[k]] += m * m;
+      if (k * binHz >= 100 && k * binHz < 3000) { hs += m; hn++; }
+    }
+    let msum = 0; for (let k = 0; k < nb; k++) msum += mag[k];
+    flat[t] = Math.exp(lsum / nb) / (sum / nb);
+    cent[t] = msum > 1e-9 ? wsum / msum : 0;
+    let cmax = 1e-12; for (let p = 0; p < 12; p++) cmax = Math.max(cmax, ch[p]);
+    for (let p = 0; p < 12; p++) chromaA[p][t] = ch[p] / cmax;
+    let e = 0; const c0 = t * HOP - NFFT / 2;
+    for (let i = 0; i < NFFT; i++) { const j = c0 + i; const v = j >= 0 && j < y.length ? y[j] : 0; e += v * v; }
+    rms[t] = Math.sqrt(e / NFFT);
+    harmA[t] = Math.log1p(50 * hs / Math.max(1, hn)) * (1 - Math.sqrt(flat[t]));
+    if (t % 400 === 0) { onProgress(0.05 + 0.45 * t / nA); await tick(); }
+  }
+  // pass 2: per-band spectral flux in dB (librosa onset_strength with top_db = 80)
+  const floorDb = 20 * Math.log10(Math.max(maxMag, 1e-5)) - 80;
+  const ranges = onsetKeys.map(k => [bin(ONSETS[k][0]), Math.min(nb - 1, bin(ONSETS[k][1]))]);
+  const prev = new Float32Array(nb), cur = new Float32Array(nb);
+  for (let t = 0; t < nA; t++) {
+    frameSpectrum(t);
+    for (let k = 0; k < nb; k++) cur[k] = Math.max(20 * Math.log10(Math.max(mag[k], 1e-5)), floorDb);
+    if (t > 0) for (let o = 0; o < ranges.length; o++) {
+      const [lo, hi] = ranges[o]; let s = 0;
+      for (let k = lo; k < hi; k++) s += Math.max(0, cur[k] - prev[k]);
+      flux[o][t] = s / (hi - lo);
+    }
+    prev.set(cur);
+    if (t % 400 === 0) { onProgress(0.5 + 0.4 * t / nA); await tick(); }
+  }
+
+  // ---- resample to video frames ----
+  const toVideo = x => {
+    const out = new Float32Array(nframes);
+    for (let i = 0; i < nframes; i++) {
+      const p = (i / FPS) * SR / HOP, a = Math.floor(p), f = p - a;
+      out[i] = a + 1 < x.length ? x[a] * (1 - f) + x[a + 1] * f : x[x.length - 1];
+    }
+    return out;
+  };
+  const F = { fps: FPS, duration: dur, nframes };
+  bandKeys.forEach((k, b) => { F[k] = smoothAR(norm(toVideo(bandRaw[b]))); });
+
+  // ---- onsets -> hits -> decaying envelopes ----
+  function peakPick(x, delta, wait) {   // librosa.util.peak_pick(pre_max=3, post_max=3, pre_avg=10, post_avg=10)
+    const out = []; let last = -Infinity;
+    for (let n = 0; n < x.length; n++) {
+      let mx = -Infinity, s = 0, c = 0;
+      for (let k = Math.max(0, n - 3); k <= Math.min(x.length - 1, n + 3); k++) mx = Math.max(mx, x[k]);
+      if (x[n] < mx) continue;
+      for (let k = Math.max(0, n - 10); k <= Math.min(x.length - 1, n + 10); k++) { s += x[k]; c++; }
+      if (x[n] >= s / c + delta && n - last > wait) { out.push(n); last = n; }
+    }
+    return out;
+  }
+  const PARAMS = { kick: [0.35, 0.18, 0.80], snare: [0.40, 0.20, 0.82], hat: [0.30, 0.08, 0.70] };
+  onsetKeys.forEach((name, o) => {
+    const env = flux[o], p99 = percentile(env, 99) + 1e-9;
+    const envn = env.map(v => v / p99);
+    const [delta, waitS, decay] = PARAMS[name];
+    const idx = peakPick(envn, delta, Math.floor(waitS * SR / HOP));
+    const strength = norm(envn);
+    const hits = new Map();
+    for (const a of idx) {
+      const v = Math.round(a * HOP / SR * FPS);
+      if (v >= 0 && v < nframes) hits.set(v, Math.max(hits.get(v) || 0, strength[a]));
+    }
+    F[name + "Hits"] = hits;
+    const e = new Float32Array(nframes); let v = 0;
+    for (let i = 0; i < nframes; i++) { const h = hits.has(i) ? clamp(hits.get(i), 0.3, 1) : 0; v = Math.max(v * decay, h); e[i] = v; }
+    F[name] = e;
+  });
+
+  // ---- chroma, tonal, harmonic, loudness, brightness ----
+  const chV = chromaA.map(c => uniformFilter(toVideo(c), 5));
+  F.chroma = new Float32Array(nframes * 12);
+  for (let i = 0; i < nframes; i++) {
+    let mx = 1e-9; for (let p = 0; p < 12; p++) mx = Math.max(mx, chV[p][i]);
+    for (let p = 0; p < 12; p++) F.chroma[i * 12 + p] = chV[p][i] / mx;
+  }
+  F.tonal = smoothAR(norm(toVideo(flat)).map(v => 1 - v), 0.2, 0.08);
+  F.harmonic = smoothAR(norm(toVideo(harmA)), 0.3, 0.08);
+  F.rms = smoothAR(norm(toVideo(rms)), 0.4, 0.06);
+  F.centroid = uniformFilter(norm(toVideo(cent)), 9);
+
+  // ---- structure: ~2 s blocks, merged bottom-up into at most 8 sections ----
+  const bh = Math.floor(2.0 * SR / HOP), nBlk = Math.max(1, Math.ceil(nA / bh));
+  const dims = [...bandRaw, ...chromaA], D = dims.length;
+  const blk = Array.from({ length: nBlk }, (_, b) => dims.map(d => {
+    let s = 0, c = 0; for (let t = b * bh; t < Math.min(nA, (b + 1) * bh); t++) { s += d[t]; c++; } return c ? s / c : 0;
+  }));
+  for (let d = 0; d < D; d++) {      // z-score each dimension
+    let m = 0; for (const v of blk) m += v[d]; m /= nBlk;
+    let sd = 0; for (const v of blk) sd += (v[d] - m) ** 2; sd = Math.sqrt(sd / nBlk) + 1e-9;
+    for (const v of blk) v[d] = (v[d] - m) / sd;
+  }
+  let segs = blk.map((v, b) => ({ start: b, n: 1, mean: v.slice() }));
+  const K = Math.max(1, Math.min(CONFIG.SECTIONS, nBlk));
+  while (segs.length > K) {
+    let best = 0, bc = Infinity;
+    for (let s = 0; s + 1 < segs.length; s++) {
+      const a = segs[s], b = segs[s + 1]; let d2 = 0;
+      for (let d = 0; d < D; d++) d2 += (a.mean[d] - b.mean[d]) ** 2;
+      const cost = d2 * a.n * b.n / (a.n + b.n);           // Ward linkage
+      if (cost < bc) { bc = cost; best = s; }
+    }
+    const a = segs[best], b = segs[best + 1], n = a.n + b.n;
+    a.mean = a.mean.map((v, d) => (v * a.n + b.mean[d] * b.n) / n); a.n = n;
+    segs.splice(best + 1, 1);
+  }
+  F.sectionTimes = segs.map(s => s.start * bh * HOP / SR);
+  F.section = new Int32Array(nframes);
+  for (let i = 0, s = 0; i < nframes; i++) {
+    while (s + 1 < segs.length && i / FPS >= F.sectionTimes[s + 1]) s++;
+    F.section[i] = s;
+  }
+  F.secEnergy = segs.map((_, s) => {
+    let sum = 0, c = 0; for (let i = 0; i < nframes; i++) if (F.section[i] === s) { sum += F.rms[i]; c++; } return c ? sum / c : 0;
+  });
+  F.energySlow = norm(uniformFilter(F.rms, FPS * 4), 1, 99);
+  onProgress(1);
+  return F;
+}
+
+// =========================== PHYSICS (port of render.py) ===================
+function curl(x, y, t, out) {
+  // analytic curl of a sum-of-sines stream function -> divergence-free flow
+  const k1 = 0.0045, k2 = 0.0081, k3 = 0.0137;
+  const a = Math.cos(k2 * (x + y) * 0.7 - 1.1 * t) * k2 * 0.7 * 0.6;
+  const b = Math.cos(k3 * y - k3 * 0.5 * x + 1.9 * t);
+  out[0] = (Math.cos(k1 * y + 0.7 * t) * k1 + a + b * k3 * 0.35) / 0.0045;
+  out[1] = -(Math.cos(k1 * x - 0.5 * t) * k1 + a + b * (-k3 * 0.5) * 0.35) / 0.0045;
+}
+
+class Scene {
+  constructor(F, nParticles) {
+    const C = CONFIG;
+    this.F = F; this.N = nParticles;
+    const rng = this.rng = makeRng(C.SEED);
+    const [cx, cy] = C.CENTER, N = nParticles;
+    this.px = new Float64Array(N); this.py = new Float64Array(N);
+    this.vx = new Float64Array(N); this.vy = new Float64Array(N); this.home = new Float64Array(N);
+    const gm = C.G_BASE * C.GRAVITY, S2 = C.SOFTEN * C.SOFTEN;
+    for (let i = 0; i < N; i++) {
+      const a = rng() * 2 * Math.PI;
+      // each particle's home orbit: dense inner disk, long faint tail
+      const r = Math.min(C.DISK_INNER + rng.gamma(1.8, C.DISK_SPREAD), 1150);
+      this.home[i] = r;
+      this.px[i] = cx + Math.cos(a) * r; this.py[i] = cy + Math.sin(a) * r;
+      const s2 = r * r + S2, vc = Math.sqrt(gm * r * r / Math.pow(s2, 1.5));
+      this.vx[i] = -Math.sin(a) * vc; this.vy[i] = Math.cos(a) * vc;
+    }
+    const NN = C.STRING_NODES;
+    this.u = new Float64Array(12 * NN); this.uv = new Float64Array(12 * NN);
+    this.harm = Array.from({ length: 12 }, (_, k) => 1 + (k * 5) % 4);
+    this.prevChroma = new Float64Array(12);
+    this.hann = Array.from({ length: 10 }, (_, n) => 0.5 - 0.5 * Math.cos(2 * Math.PI * n / 9));
+    const NS = C.N_SPARKS;
+    this.sx = new Float64Array(NS); this.sy = new Float64Array(NS); this.svx = new Float64Array(NS); this.svy = new Float64Array(NS);
+    this.slife = new Float64Array(NS); this.smax = new Float64Array(NS).fill(1); this.scol = new Float32Array(NS * 3);
+    this.sparkPtr = 0;
+    this.rings = new Float64Array(16 * 5);  // cx, cy, radius, push, age
+    this.nrings = 0; this.ringSide = 0;
+    this.theta = 0; this.calm = 0;
+    this.pal = PALETTES[0].map(c => c.slice());
+    this.tmp = [0, 0];
+    this.frame = -1;
+  }
+
+  stringPoints() {   // world positions of all string nodes, as 12 x {x, y}
+    const C = CONFIG, NN = C.STRING_NODES, [cx, cy] = C.CENTER, pts = [];
+    for (let k = 0; k < 12; k++) {
+      const xs = new Float64Array(NN), ys = new Float64Array(NN);
+      for (let n = 0; n < NN; n++) {
+        const t = n / (NN - 1), rad = C.STRING_INNER + (C.STRING_OUTER - C.STRING_INNER) * t;
+        const ang = k * (2 * Math.PI / 12) - Math.PI / 2 + 0.55 * t;   // gentle spiral, a vortex not spokes
+        const ux = Math.cos(ang), uy = Math.sin(ang), d = this.u[k * NN + n];
+        xs[n] = cx + ux * rad - uy * d; ys[n] = cy + uy * rad + ux * d;
+      }
+      pts.push({ x: xs, y: ys });
+    }
+    return pts;
+  }
+
+  step(i) {
+    const C = CONFIG, F = this.F, t = i * DT, [cx, cy] = C.CENTER, rng = this.rng;
+    this.frame = i;
+    const bass = 0.6 * F.sub[i] + 0.4 * F.bass[i];
+    const secE = F.secEnergy[F.section[i]];
+    const calm = clamp(1 - secE / 0.6, 0, 1);           // 1 in breakdowns
+    const gm = (C.G_BASE + C.G_BASS * bass) * (1 - 0.45 * calm) * C.GRAVITY;
+
+    let kickImp = 0;
+    if (F.kickHits.has(i)) kickImp = C.KICK_PUSH * (0.4 + 0.6 * F.kickHits.get(i));
+
+    // snare -> new shockwave, alternating either side of the core
+    const R = this.rings;
+    if (F.snareHits.has(i) && F.snare[i] > 0.25) {
+      let j = this.nrings;
+      if (j >= 16) { j = 0; for (let q = 1; q < 16; q++) if (R[q * 5 + 4] > R[j * 5 + 4]) j = q; }
+      const side = this.ringSide % 2 === 0 ? 1 : -1; this.ringSide++;
+      const off = 160 + 140 * rng();
+      const ang = this.theta + side * 1.2 + rng.normal(0, 0.3);
+      R.set([cx + Math.cos(ang) * off, cy + Math.sin(ang) * off, 0, C.SNARE_PUSH * (0.5 + 0.5 * F.snareHits.get(i)), 0], j * 5);
+      this.nrings = Math.min(16, this.nrings + 1);
+    }
+    let keep = 0;
+    for (let j = 0; j < this.nrings; j++) {
+      R[j * 5 + 2] += C.SNARE_SPEED * DT; R[j * 5 + 4] += DT;
+      if (R[j * 5 + 4] < 1.6) { if (keep !== j) R.copyWithin(keep * 5, j * 5, j * 5 + 5); keep++; }
+    }
+    this.nrings = keep;
+
+    const torque = 0.85 + C.TORQUE * F.lowmid[i];
+    const turb = C.TURB * (0.15 + 0.6 * F.air[i] + 0.9 * F.hat[i]);
+    const drag = C.DRAG * (1 - 0.5 * calm);
+    const diskScale = 1 + 0.6 * calm;
+    this.stepParticles(cx, cy, gm, kickImp, torque, turb, drag, t, diskScale);
+
+    // strings: driven by chroma, plucked on rising notes
+    const NN = C.STRING_NODES, ch = F.chroma.subarray(i * 12, i * 12 + 12);
+    const harm = F.harmonic[i] * (0.4 + 0.6 * F.tonal[i]);
+    const amp = new Float64Array(12);
+    for (let k = 0; k < 12; k++) {
+      amp[k] = ch[k] * ch[k] * harm * 9000;
+      const rise = Math.max(0, ch[k] - this.prevChroma[k]);
+      for (let n = 0; n < 10; n++) this.uv[k * NN + 10 + n] += rise * 900 * harm * this.hann[n];
+      this.prevChroma[k] = ch[k] * 0.7 + this.prevChroma[k] * 0.3;
+    }
+    this.stepStrings(amp, t, 8);
+    for (let q = 0; q < this.u.length; q++) this.u[q] = clamp(this.u[q], -140, 140);
+
+    // sparks on hats, born on the vibrating strings
+    if (F.hatHits.has(i)) {
+      const nsp = Math.floor(40 + 160 * F.hatHits.get(i) * (0.3 + F.air[i]));
+      const pts = this.stringPoints();
+      for (let s = 0; s < nsp; s++) {
+        const k = Math.floor(rng() * 12), n = 8 + Math.floor(rng() * (NN - 10));
+        const p = this.sparkPtr; this.sparkPtr = (p + 1) % C.N_SPARKS;
+        this.sx[p] = pts[k].x[n]; this.sy[p] = pts[k].y[n];
+        const a = rng() * 2 * Math.PI, sp = 150 + rng() * 500;
+        this.svx[p] = Math.cos(a) * sp; this.svy[p] = Math.sin(a) * sp;
+        const life = 0.35 + rng() * 0.55; this.slife[p] = life; this.smax[p] = life;
+        for (let c = 0; c < 3; c++) this.scol[p * 3 + c] = 0.5 * STRING_COLORS[k][c] + 0.5;
+      }
+    }
+    this.stepSparks(cx, cy, gm, turb, t);
+
+    // camera + palette
+    this.theta += (C.SPIN_BASE + C.SPIN_ENERGY * F.energySlow[i]) * DT;
+    const target = PALETTES[C.PALETTE_LOCK >= 0 ? C.PALETTE_LOCK : F.section[i] % PALETTES.length];
+    const k = 1 - Math.exp(-1.2 * DT);
+    for (let a = 0; a < 4; a++) for (let c = 0; c < 3; c++) this.pal[a][c] += (target[a][c] - this.pal[a][c]) * k;
+    this.calm = calm;
+  }
+
+  stepParticles(cx, cy, gm, kickImp, torque, turb, drag, t, diskScale) {
+    const C = CONFIG, { px, py, vx, vy, home } = this, R = this.rings, nr = this.nrings, tmp = this.tmp;
+    const S2 = C.SOFTEN * C.SOFTEN, W = C.SNARE_WIDTH, KR = C.KICK_RANGE, DR = C.DISK_RESTORE;
+    for (let i = 0; i < this.N; i++) {
+      const dx = px[i] - cx, dy = py[i] - cy, r2 = dx * dx + dy * dy, r = Math.sqrt(r2) + 1e-3;
+      const s2 = r2 + S2, inv = 1 / (s2 * Math.sqrt(s2));
+      let ax = -gm * dx * inv, ay = -gm * dy * inv;
+      // viscosity: relax toward this particle's own circular orbit; low-mids spin it faster
+      const vc = Math.sqrt(gm * r2 * inv) * torque;
+      const vr = -DR * (r - home[i] * diskScale);
+      ax += -drag * (vx[i] - (-dy / r) * vc - dx / r * vr);
+      ay += -drag * (vy[i] - (dx / r) * vc - dy / r * vr);
+      curl(px[i], py[i], t, tmp);
+      ax += tmp[0] * turb; ay += tmp[1] * turb;
+      let vxi = vx[i] + ax * DT, vyi = vy[i] + ay * DT;
+      if (kickImp > 0) { const k = kickImp * Math.exp(-r / KR); vxi += dx / r * k; vyi += dy / r * k; }
+      for (let j = 0; j < nr; j++) {
+        const rx = px[i] - R[j * 5], ry = py[i] - R[j * 5 + 1], d = Math.sqrt(rx * rx + ry * ry) + 1e-3, off = d - R[j * 5 + 2];
+        if (off > -W && off < W * 0.3) { const f = R[j * 5 + 3] * (1 - Math.abs(off) / W); vxi += rx / d * f; vyi += ry / d * f; }
+      }
+      px[i] += vxi * DT; py[i] += vyi * DT; vx[i] = vxi; vy[i] = vyi;
+      if (r < 22 || r > 1350) {      // respawn if swallowed or escaped
+        const a = this.rng() * 2 * Math.PI, rr = home[i] * diskScale;
+        px[i] = cx + Math.cos(a) * rr; py[i] = cy + Math.sin(a) * rr;
+        const q2 = rr * rr + S2, v = Math.sqrt(gm * rr * rr / (q2 * Math.sqrt(q2)));
+        vx[i] = -Math.sin(a) * v; vy[i] = Math.cos(a) * v;
+      }
+    }
+  }
+
+  stepStrings(amp, t, substeps) {    // 1-D wave equation per string
+    const NN = CONFIG.STRING_NODES, u = this.u, v = this.uv, c2 = 55 * 55, h = DT / substeps;
+    for (let s = 0; s < substeps; s++) {
+      for (let k = 0; k < 12; k++) {
+        const f = amp[k] * Math.sin(2 * Math.PI * 0.45 * this.harm[k] * t + k), o = k * NN;
+        for (let n = 1; n < NN - 1; n++) {
+          let a = c2 * (u[o + n - 1] - 2 * u[o + n] + u[o + n + 1]) - 2.2 * v[o + n];
+          if (n === 6) a += f;
+          v[o + n] += a * h;
+        }
+        for (let n = 1; n < NN - 1; n++) u[o + n] += v[o + n] * h;
+      }
+      t += h;
+    }
+  }
+
+  stepSparks(cx, cy, gm, turb, t) {
+    const S2 = CONFIG.SOFTEN * CONFIG.SOFTEN, tmp = this.tmp;
+    for (let i = 0; i < this.sx.length; i++) {
+      if (this.slife[i] <= 0) continue;
+      const dx = this.sx[i] - cx, dy = this.sy[i] - cy, r2 = dx * dx + dy * dy + S2, inv = 1 / (r2 * Math.sqrt(r2));
+      curl(this.sx[i] * 1.7, this.sy[i] * 1.7, t * 1.5, tmp);
+      this.svx[i] += (-gm * dx * inv * 0.5 + tmp[0] * turb * 2) * DT;
+      this.svy[i] += (-gm * dy * inv * 0.5 + tmp[1] * turb * 2) * DT;
+      this.svx[i] *= 1 - 1.6 * DT; this.svy[i] *= 1 - 1.6 * DT;
+      this.sx[i] += this.svx[i] * DT; this.sy[i] += this.svy[i] * DT;
+      this.slife[i] -= DT;
+    }
+  }
+}
+
+// =========================== WEBGL RENDERER ================================
+class Renderer {
+  constructor(canvas) {
+    this.canvas = canvas;
+    const gl = this.gl = canvas.getContext("webgl2", { antialias: false, alpha: false, preserveDrawingBuffer: true, premultipliedAlpha: false });
+    if (!gl) throw new Error("This browser has no WebGL2. Try a recent Chrome, Safari or Firefox.");
+    this.hdr = !!(gl.getExtension("EXT_color_buffer_float") || gl.getExtension("EXT_color_buffer_half_float"));
+    gl.getExtension("EXT_float_blend");
+    this.vao = gl.createVertexArray();
+    const FS_VERT = `#version 300 es
+      out vec2 v_uv;
+      void main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); v_uv = p; gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }`;
+    const CAM = `
+      uniform vec2 u_center; uniform vec2 u_rot; uniform float u_zoom; uniform vec2 u_world;
+      vec4 cam(vec2 p){
+        vec2 d = (p - u_center) * u_zoom;
+        vec2 q = u_center + vec2(d.x * u_rot.x - d.y * u_rot.y, d.x * u_rot.y + d.y * u_rot.x);
+        return vec4(q.x / u_world.x * 2.0 - 1.0, 1.0 - q.y / u_world.y * 2.0, 0.0, 1.0);
+      }`;
+    // a 2-pixel point whose weights reproduce the bilinear splat in render.py
+    const SPLAT_FRAG = `#version 300 es
+      precision highp float; in vec3 v_col; out vec4 o;
+      void main(){ vec2 w = 1.0 - abs(gl_PointCoord * 2.0 - 1.0); o = vec4(v_col * w.x * w.y, 1.0); }`;
+    this.pParticles = this.program(`#version 300 es
+      layout(location=0) in vec4 a; ${CAM}
+      uniform vec3 u_cold; uniform vec3 u_hot; uniform float u_warmth; uniform float u_base; uniform float u_mult;
+      out vec3 v_col;
+      void main(){
+        float s = length(a.zw);
+        float t = min(1.0, s / (650.0 - 250.0 * u_warmth)); t = t * t * (3.0 - 2.0 * t);
+        v_col = mix(u_cold, u_hot, t) * u_base * (0.45 + 1.3 * t) * u_mult;
+        gl_Position = cam(a.xy); gl_PointSize = 2.0;
+      }`, SPLAT_FRAG);
+    this.pDots = this.program(`#version 300 es
+      layout(location=0) in vec2 a_pos; layout(location=1) in vec4 a_col; ${CAM}
+      uniform float u_mult; out vec3 v_col;
+      void main(){ v_col = a_col.rgb * a_col.a * u_mult; gl_Position = cam(a_pos); gl_PointSize = 2.0; }`, SPLAT_FRAG);
+    this.pFade = this.program(FS_VERT, `#version 300 es
+      precision highp float; out vec4 o; void main(){ o = vec4(0.0); }`);
+    this.pDisc = this.program(FS_VERT, `#version 300 es
+      precision highp float; in vec2 v_uv; uniform vec2 u_world; uniform vec2 u_c; uniform float u_r; out vec4 o;
+      void main(){ vec2 w = vec2(v_uv.x, 1.0 - v_uv.y) * u_world; if (distance(w, u_c) > u_r) discard; o = vec4(0.0, 0.0, 0.0, 1.0); }`);
+    this.pDown = this.program(FS_VERT, `#version 300 es
+      precision highp float; in vec2 v_uv; uniform sampler2D u_tex; uniform vec2 u_texel; out vec4 o;
+      void main(){ vec2 d = u_texel;
+        o = 0.25 * (texture(u_tex, v_uv + vec2(-d.x,-d.y)) + texture(u_tex, v_uv + vec2(d.x,-d.y)) +
+                    texture(u_tex, v_uv + vec2(-d.x, d.y)) + texture(u_tex, v_uv + vec2(d.x, d.y))); }`);
+    this.pBlur = this.program(FS_VERT, `#version 300 es
+      precision highp float; in vec2 v_uv; uniform sampler2D u_tex; uniform vec2 u_dir; uniform float u_w[13]; uniform int u_n; out vec4 o;
+      void main(){ vec4 s = texture(u_tex, v_uv) * u_w[0];
+        for (int i = 1; i < 13; i++){ if (i > u_n) break; vec2 off = u_dir * float(i); s += (texture(u_tex, v_uv + off) + texture(u_tex, v_uv - off)) * u_w[i]; }
+        o = s; }`);
+    this.pComp = this.program(FS_VERT, `#version 300 es
+      precision highp float; in vec2 v_uv;
+      uniform sampler2D u_acc; uniform sampler2D u_b1; uniform sampler2D u_b2;
+      uniform vec2 u_world; uniform vec2 u_center; uniform vec3 u_bg; uniform float u_lift, u_glow, u_exposure, u_fade, u_seed;
+      uniform vec2 u_res; out vec4 o;
+      float hash(vec3 p){ p = fract(p * vec3(443.897, 441.423, 437.195)); p += dot(p, p.yzx + 19.19); return fract((p.x + p.y) * p.z); }
+      void main(){
+        vec2 w = vec2(v_uv.x, 1.0 - v_uv.y) * u_world;
+        float d = length(vec2(w.x - u_center.x, (w.y - u_center.y) * 0.8)) / 1100.0;
+        float bgShape = pow(clamp(1.0 - d, 0.0, 1.0), 1.6);
+        float vig = clamp(1.15 - 0.55 * d * d, 0.0, 1.0);
+        vec3 bloom = (texture(u_b1, v_uv).rgb * 0.9 + texture(u_b2, v_uv).rgb * 1.6) * u_glow;
+        vec3 x = texture(u_acc, v_uv).rgb + bloom + bgShape * u_bg * u_lift * 0.7;
+        x = 1.0 - exp(-x * u_exposure);
+        x *= vig * u_fade;
+        x = pow(clamp(x, 0.0, 1.0), vec3(1.0 / 1.5));
+        vec2 g = floor(gl_FragCoord.xy * 0.5);
+        float n = (hash(vec3(g, u_seed)) + hash(vec3(g + 17.0, u_seed + 3.0)) - 1.0) * 2.45;   // ~ unit-variance grain
+        o = vec4(x + n * (1.2 / 255.0), 1.0);
+      }`);
+    this.partBuf = gl.createBuffer(); this.dotBuf = gl.createBuffer();
+    this.dots = new Float32Array(6 * 65536); this.dotCap = 0;
+    this.partVao = gl.createVertexArray();
+    gl.bindVertexArray(this.partVao); gl.bindBuffer(gl.ARRAY_BUFFER, this.partBuf);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 16, 0);
+    this.dotVao = gl.createVertexArray();
+    gl.bindVertexArray(this.dotVao); gl.bindBuffer(gl.ARRAY_BUFFER, this.dotBuf);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 24, 8);
+    gl.bindVertexArray(null);
+  }
+  program(vs, fs) {
+    const gl = this.gl, p = gl.createProgram();
+    for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+      const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+      gl.attachShader(p, s);
+    }
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    const u = {}, n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+    for (let i = 0; i < n; i++) { const name = gl.getActiveUniform(p, i).name.replace("[0]", ""); u[name] = gl.getUniformLocation(p, name); }
+    return { p, u };
+  }
+  target(w, h) {
+    const gl = this.gl, tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    if (this.hdr) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fb = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      if (this.hdr) { this.hdr = false; return this.target(w, h); }
+      throw new Error("Could not create a render target.");
+    }
+    return { tex, fb, w, h };
+  }
+  resize(scale) {
+    const C = CONFIG, gl = this.gl;
+    this.scale = scale;
+    const W = Math.round(C.W * scale), H = Math.round(C.H * scale);
+    this.canvas.width = W; this.canvas.height = H;
+    for (const k of ["acc", "q1", "q2", "s1", "s2"]) if (this[k]) { gl.deleteTexture(this[k].tex); gl.deleteFramebuffer(this[k].fb); }
+    this.acc = this.target(W, H);
+    this.q1 = this.target(Math.round(W / 4), Math.round(H / 4)); this.q2 = this.target(this.q1.w, this.q1.h);
+    this.s1 = this.target(Math.round(W / 16), Math.round(H / 16)); this.s2 = this.target(this.s1.w, this.s1.h);
+    this.clear();
+  }
+  clear() { const gl = this.gl; gl.bindFramebuffer(gl.FRAMEBUFFER, this.acc.fb); gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT); }
+  gaussian(sigma) {
+    const n = Math.min(12, Math.ceil(sigma * 3)), w = new Float32Array(13); let s = 0;
+    for (let i = 0; i <= n; i++) { w[i] = Math.exp(-i * i / (2 * sigma * sigma)); s += i ? 2 * w[i] : w[i]; }
+    for (let i = 0; i <= n; i++) w[i] /= s;
+    return { w, n };
+  }
+  pushDot(n, x, y, r, g, b, a) {
+    if ((n + 1) * 6 > this.dots.length) { const d = new Float32Array(this.dots.length * 2); d.set(this.dots); this.dots = d; }
+    const o = n * 6, D = this.dots; D[o] = x; D[o + 1] = y; D[o + 2] = r; D[o + 3] = g; D[o + 4] = b; D[o + 5] = a;
+  }
+
+  draw(sc) {
+    const C = CONFIG, gl = this.gl, F = sc.F, i = sc.frame, [cx, cy] = C.CENTER;
+    const W = this.acc.w, H = this.acc.h, s = this.scale;
+    const [bg, cold, hot, accent] = sc.pal;
+    const ca = Math.cos(sc.theta), sa = Math.sin(sc.theta);
+    const zoom = 1 + 0.035 * F.kick[i] + 0.04 * F.energySlow[i];
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.acc.fb); gl.viewport(0, 0, W, H);
+    gl.bindVertexArray(this.vao);
+    // trails: framebuffer *= TRAIL
+    gl.enable(gl.BLEND); gl.blendColor(0, 0, 0, C.TRAIL); gl.blendFunc(gl.ZERO, gl.CONSTANT_ALPHA);
+    gl.useProgram(this.pFade.p); gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.blendFunc(gl.ONE, gl.ONE);   // additive from here on
+
+    const setCam = (P, rot) => {
+      gl.uniform2f(P.u.u_center, cx, cy); gl.uniform2f(P.u.u_rot, rot ? ca : 1, rot ? sa : 0);
+      gl.uniform1f(P.u.u_zoom, zoom); gl.uniform2f(P.u.u_world, C.W, C.H);
+    };
+    // particles: a 2-D cloud; at lower resolution more of them land in each pixel, so dim by scale^2
+    const N = sc.N;
+    if (!this.partData || this.partData.length !== N * 4) this.partData = new Float32Array(N * 4);
+    const P4 = this.partData;
+    for (let k = 0; k < N; k++) { P4[k * 4] = sc.px[k]; P4[k * 4 + 1] = sc.py[k]; P4[k * 4 + 2] = sc.vx[k]; P4[k * 4 + 3] = sc.vy[k]; }
+    const P = this.pParticles; gl.useProgram(P.p); setCam(P, true);
+    gl.uniform3fv(P.u.u_cold, cold); gl.uniform3fv(P.u.u_hot, hot);
+    gl.uniform1f(P.u.u_warmth, F.centroid[i]); gl.uniform1f(P.u.u_base, C.PARTICLE_INT * (0.6 + 0.6 * F.rms[i]));
+    gl.uniform1f(P.u.u_mult, s * s);
+    gl.bindVertexArray(this.partVao); gl.bindBuffer(gl.ARRAY_BUFFER, this.partBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, P4, gl.STREAM_DRAW);
+    gl.drawArrays(gl.POINTS, 0, N);
+
+    // line-like things (rings, strings, spark streaks, photon ring): dim by scale
+    let n = 0;
+    for (let j = 0; j < sc.nrings; j++) {      // shockwave rings: a refracted, slightly imperfect wavefront
+      const R = sc.rings, rcx = R[j * 5], rcy = R[j * 5 + 1], rad = R[j * 5 + 2], push = R[j * 5 + 3], age = R[j * 5 + 4];
+      if (rad < 4) continue;
+      const m = Math.floor(2 * Math.PI * rad / 1.2), fade = (1 - age / 1.6) ** 2 * (push / C.SNARE_PUSH || 0) * 0.16;
+      for (let q = 0; q < m; q++) {
+        const a = q * 2 * Math.PI / m, rr = rad * (1 + 0.012 * Math.sin(a * 7 + age * 9));
+        this.pushDot(n++, rcx + Math.cos(a) * rr, rcy + Math.sin(a) * rr, accent[0], accent[1], accent[2], fade);
+      }
+    }
+    const pts = sc.stringPoints(), ch = F.chroma.subarray(i * 12, i * 12 + 12), NN = C.STRING_NODES;
+    const L = new Float64Array(NN);
+    for (let k = 0; k < 12; k++) {
+      const { x, y } = pts[k]; L[0] = 0;
+      for (let q = 1; q < NN; q++) L[q] = L[q - 1] + Math.hypot(x[q] - x[q - 1], y[q] - y[q - 1]);
+      const col = STRING_COLORS[k], base = C.STRING_INT * (0.06 + 0.5 * ch[k] * ch[k]);
+      for (let d = 0, seg = 0; d < L[NN - 1]; d += 1.6) {
+        while (seg < NN - 2 && L[seg + 1] < d) seg++;
+        const f = (d - L[seg]) / (L[seg + 1] - L[seg] || 1);
+        const xx = x[seg] + (x[seg + 1] - x[seg]) * f, yy = y[seg] + (y[seg + 1] - y[seg]) * f;
+        const disp = Math.abs(sc.u[k * NN + seg]) * (1 - f) + Math.abs(sc.u[k * NN + seg + 1]) * f;
+        const taper = Math.pow(Math.sin(Math.PI * d / L[NN - 1]), 0.6);
+        this.pushDot(n++, xx, yy, col[0], col[1], col[2], base * taper * (0.5 + disp / 40));
+      }
+    }
+    for (let p = 0; p < sc.sx.length; p++) {    // sparks, drawn as short streaks along their velocity
+      if (sc.slife[p] <= 0) continue;
+      const fr = sc.slife[p] / sc.smax[p];
+      for (let b = 0; b < 10; b++) {
+        const back = 0.03 * b / 9;
+        this.pushDot(n++, sc.sx[p] - sc.svx[p] * back, sc.sy[p] - sc.svy[p] * back,
+          sc.scol[p * 3], sc.scol[p * 3 + 1], sc.scol[p * 3 + 2], 0.45 * fr * (1 - back / 0.035));
+      }
+    }
+    const nCam = n;
+    // core: dark well ringed by a bright photon ring that swells with the sub and flares on kicks
+    const pr = 46 * (1 + 0.25 * F.sub[i] + 0.18 * F.kick[i]);
+    const flare = 0.10 + 0.25 * F.kick[i] + 0.1 * F.sub[i];
+    const cc = hot.map(v => v * 0.6 + 0.4);
+    for (const [dr, w] of [[0, 1], [2.5, 0.5], [-2.5, 0.5], [6, 0.2]]) {
+      for (let q = 0; q < 900; q++) {
+        const a = q * 2 * Math.PI / 900, dop = 0.55 + 0.45 * Math.cos(a - 0.6);   // brighter approaching side
+        this.pushDot(n++, cx + Math.cos(a) * (pr + dr), cy + Math.sin(a) * (pr + dr) * 0.92, cc[0], cc[1], cc[2], flare * w * dop);
+      }
+    }
+    const D = this.pDots; gl.useProgram(D.p); gl.uniform1f(D.u.u_mult, s);
+    gl.bindVertexArray(this.dotVao); gl.bindBuffer(gl.ARRAY_BUFFER, this.dotBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, this.dots.subarray(0, n * 6), gl.STREAM_DRAW);
+    setCam(D, true); gl.drawArrays(gl.POINTS, 0, nCam);
+    setCam(D, false); gl.drawArrays(gl.POINTS, nCam, n - nCam);
+
+    // punch out the black hole
+    gl.disable(gl.BLEND); gl.bindVertexArray(this.vao);
+    const Q = this.pDisc; gl.useProgram(Q.p);
+    gl.uniform2f(Q.u.u_world, C.W, C.H); gl.uniform2f(Q.u.u_c, cx, cy); gl.uniform1f(Q.u.u_r, Math.floor(pr * zoom * 0.8));
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    this.compose(sc, zoom);
+    this.lastDots = n + N;
+  }
+
+  pass(prog, dst, setup) {
+    const gl = this.gl; gl.bindFramebuffer(gl.FRAMEBUFFER, dst ? dst.fb : null);
+    gl.viewport(0, 0, dst ? dst.w : this.canvas.width, dst ? dst.h : this.canvas.height);
+    gl.useProgram(prog.p); setup(prog.u); gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+  bindTex(unit, t) { const gl = this.gl; gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t.tex); }
+
+  compose(sc, zoom) {
+    const C = CONFIG, gl = this.gl, F = sc.F, i = sc.frame, s = this.scale;
+    // bloom at two scales (quarter and sixteenth resolution)
+    const down = (src, dst) => this.pass(this.pDown, dst, u => { this.bindTex(0, src); gl.uniform1i(u.u_tex, 0); gl.uniform2f(u.u_texel, 1 / src.w, 1 / src.h); });
+    const blur = (a, b, sigma) => {
+      const g = this.gaussian(sigma);
+      for (const [src, dst, dir] of [[a, b, [1 / a.w, 0]], [b, a, [0, 1 / a.h]]])
+        this.pass(this.pBlur, dst, u => { this.bindTex(0, src); gl.uniform1i(u.u_tex, 0); gl.uniform2f(u.u_dir, dir[0], dir[1]); gl.uniform1fv(u.u_w, g.w); gl.uniform1i(u.u_n, g.n); });
+    };
+    down(this.acc, this.q1); down(this.q1, this.s1);
+    blur(this.q1, this.q2, Math.max(0.75, 4 * s)); blur(this.s1, this.s2, Math.max(0.75, 3 * s));
+    const t = i * DT, dur = F.duration;
+    const fade = Math.min(1, t / C.FADE_IN, Math.max(0, (dur - t) / C.FADE_OUT));
+    this.pass(this.pComp, null, u => {
+      this.bindTex(0, this.acc); this.bindTex(1, this.q1); this.bindTex(2, this.s1);
+      gl.uniform1i(u.u_acc, 0); gl.uniform1i(u.u_b1, 1); gl.uniform1i(u.u_b2, 2);
+      gl.uniform2f(u.u_world, C.W, C.H); gl.uniform2f(u.u_center, C.CENTER[0], C.CENTER[1]);
+      gl.uniform3fv(u.u_bg, sc.pal[0]);
+      gl.uniform1f(u.u_lift, 0.5 + 1.2 * F.energySlow[i] + 0.6 * F.bass[i]);
+      gl.uniform1f(u.u_glow, C.GLOW); gl.uniform1f(u.u_exposure, C.EXPOSURE); gl.uniform1f(u.u_fade, fade);
+      gl.uniform1f(u.u_seed, (i % 8) + 1); gl.uniform2f(u.u_res, this.canvas.width, this.canvas.height);
+    });
+  }
+}
+
+// =========================== DEMO TRACK ====================================
+// 40 s, 120 bpm: intro (pads + hats), drop, breakdown (pads only), drop.
+function makeDemoTrack() {
+  const sr = 44100, dur = 40, n = sr * dur, y = new Float32Array(n), rng = makeRng(3), beat = 0.5;
+  const add = (t0, len, fn) => { const a = Math.floor(t0 * sr), m = Math.floor(len * sr); for (let k = 0; k < m && a + k < n; k++) y[a + k] += fn(k / sr); };
+  const chords = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]];      // Am F C G
+  const hz = m => 440 * Math.pow(2, (m - 69) / 12);
+  const drums = t => (t >= 8 && t < 24) || t >= 32;
+  for (let bar = 0; bar < 20; bar++) {
+    const t0 = bar * 2, ch = chords[bar % 4], breakdown = t0 >= 24 && t0 < 32;
+    add(t0, 2.05, t => {   // pad
+      const env = Math.min(1, t / 0.3) * Math.min(1, (2.05 - t) / 0.2);
+      let s = 0; for (const m of ch) for (const det of [-0.08, 0.08]) s += Math.sin(2 * Math.PI * hz(m + 12 + det) * t);
+      return s * 0.028 * env * (breakdown ? 1.5 : 1);
+    });
+    if (drums(t0)) for (let b = 0; b < 4; b++) {
+      const tb = t0 + b * beat, root = hz(ch[0] - 24);
+      add(tb, 0.45, t => {   // bass, a soft saw
+        let s = 0; for (let h = 1; h < 6; h++) s += Math.sin(2 * Math.PI * root * h * t) / h;
+        return s * 0.11 * Math.exp(-t * 3) * Math.min(1, t / 0.01);
+      });
+    }
+  }
+  for (let tb = 0; tb < dur; tb += beat) {
+    if (drums(tb)) {
+      add(tb, 0.35, t => Math.sin(2 * Math.PI * (48 * t + 90 / 28 * (1 - Math.exp(-t * 28)))) * Math.exp(-t * 7) * 0.9);   // kick
+      if (Math.round(tb / beat) % 2 === 1) add(tb, 0.22, t => (rng() * 2 - 1) * Math.exp(-t * 18) * 0.42 + Math.sin(2 * Math.PI * 190 * t) * Math.exp(-t * 25) * 0.2);   // snare
+    }
+    if (tb >= 2 && !(tb >= 24 && tb < 32)) for (const off of [0, 0.25]) {
+      let last = 0;
+      add(tb + off, 0.06, t => { const w = rng() * 2 - 1, v = w - last; last = w; return v * Math.exp(-t * 70) * (off ? 0.12 : 0.18); });   // hats
+    }
+  }
+  let peak = 0; for (let k = 0; k < n; k++) peak = Math.max(peak, Math.abs(y[k]));
+  for (let k = 0; k < n; k++) y[k] = y[k] / peak * 0.9;
+  const buf = new AudioBuffer({ length: n, sampleRate: sr, numberOfChannels: 1 });
+  buf.copyToChannel(y, 0);
+  return buf;
+}
+
+// =========================== APP ===========================================
+const $ = id => document.getElementById(id);
+const canvas = $("gl");
+const app = {
+  F: null, buffer: null, scene: null, name: "demo",
+  ctx: null, src: null, playing: false, startAt: 0, offset: 0,
+  recording: null, recBlob: null, downloads: null, scale: 0.5,
+  fpsT: performance.now(), fpsN: 0, fps: 0, busy: false,
+};
+let renderer;
+try { renderer = new Renderer(canvas); renderer.resize(app.scale); }
+catch (e) { showOverlay("WebGL2 is not available", e.message, null); }
+
+window.claude?.use?.("downloads").then(d => { app.downloads = d; }).catch(() => {});
+
+function showOverlay(title, msg, progress) {
+  $("overlay").hidden = false; $("ovTitle").textContent = title; $("ovMsg").textContent = msg;
+  $("ovBar").parentElement.hidden = progress == null;
+  if (progress != null) $("ovBar").style.width = Math.round(progress * 100) + "%";
+}
+function hideOverlay() { $("overlay").hidden = true; }
+function setEnabled(on) { for (const id of ["playBtn", "restartBtn", "recBtn", "stillBtn"]) $(id).disabled = !on; }
+
+// ----- settings UI -----
+function buildSettings() {
+  const box = $("sliders"); box.textContent = "";
+  for (const [key, label, min, max, step] of SLIDERS) {
+    const row = document.createElement("div"); row.className = "ctl";
+    const id = "s_" + key;
+    row.innerHTML = `<label for="${id}"></label><input type="range" id="${id}" min="${min}" max="${max}" step="${step}"><output for="${id}"></output>`;
+    row.querySelector("label").textContent = label;
+    const inp = row.querySelector("input"), out = row.querySelector("output");
+    const show = () => { out.textContent = (+CONFIG[key]).toFixed(step < 0.1 ? 2 : step < 1 ? 1 : 0); };
+    inp.value = CONFIG[key]; show();
+    inp.addEventListener("input", () => { CONFIG[key] = +inp.value; show(); if (!app.playing) redrawStill(); });
+    box.appendChild(row);
+  }
+  const sel = $("palSel"); sel.textContent = "";
+  const o0 = document.createElement("option"); o0.value = "-1"; o0.textContent = "Follow song sections"; sel.appendChild(o0);
+  PALETTE_NAMES.forEach((name, k) => { const o = document.createElement("option"); o.value = k; o.textContent = name; sel.appendChild(o); });
+  sel.value = String(CONFIG.PALETTE_LOCK);
+}
+$("palSel").addEventListener("change", e => { CONFIG.PALETTE_LOCK = +e.target.value; });
+$("partSel").addEventListener("change", e => { CONFIG.N_PARTICLES = +e.target.value; });
+$("resSel").addEventListener("change", e => { app.scale = +e.target.value; });
+$("resetBtn").addEventListener("click", () => {
+  Object.assign(CONFIG, JSON.parse(JSON.stringify(DEFAULTS)));
+  $("partSel").value = String(CONFIG.N_PARTICLES); buildSettings(); if (!app.playing) redrawStill();
+});
+buildSettings();
+
+// ----- meters -----
+const METERS = [["sub", "SUB", "well"], ["kick", "KICK", "blast"], ["snare", "SNARE", "rings"], ["lowmid", "LOW MID", "spin"], ["hat", "HATS", "sparks"], ["centroid", "BRIGHT", "warmth"]];
+const meterEls = METERS.map(([k, label, what]) => {
+  const m = document.createElement("div"); m.className = "meter";
+  m.innerHTML = `<div class="well"><i></i></div><span></span><small></small>`;
+  m.querySelector("span").textContent = label; m.querySelector("small").textContent = what;
+  $("meters").appendChild(m); return m.querySelector("i");
+});
+const chromaEls = NOTE_NAMES.map((nm, k) => {
+  const d = document.createElement("i"); const c = STRING_COLORS[k];
+  d.style.background = `rgb(${c.map(v => Math.round(v * 255)).join(",")})`; $("chroma").appendChild(d);
+  const l = document.createElement("span"); l.textContent = nm; $("chromaLabels").appendChild(l);
+  return d;
+});
+function updateMeters(i) {
+  const F = app.F; if (!F) return;
+  METERS.forEach(([k], j) => { meterEls[j].style.height = Math.round(F[k][i] * 100) + "%"; });
+  for (let k = 0; k < 12; k++) { const v = F.chroma[i * 12 + k]; chromaEls[k].style.opacity = (0.12 + 0.88 * v * v).toFixed(2); }
+  $("tSec").textContent = "section " + (F.section[i] + 1) + "/" + F.secEnergy.length;
+}
+
+// ----- loading + analysis -----
+async function loadBuffer(buf, name) {
+  if (app.busy) return; app.busy = true;
+  stopPlayback(); setEnabled(false); $("saveOut").hidden = true; app.recBlob = null;
+  app.buffer = buf; app.name = name;
+  showOverlay("Analysing", "Listening for kicks, snares, hats and chords…", 0);
+  const t0 = performance.now();
+  try {
+    app.F = await analyse(buf, p => showOverlay("Analysing", "Listening for kicks, snares, hats and chords…", p * 0.7));
+  } catch (e) { showOverlay("Could not analyse this file", String(e.message || e), null); app.busy = false; return; }
+  const F = app.F, took = ((performance.now() - t0) / 1000).toFixed(1);
+  $("hits").innerHTML = "";
+  const stat = (k, v) => { const s = document.createElement("span"); s.innerHTML = `${k} <b></b>`; s.querySelector("b").textContent = v; $("hits").appendChild(s); };
+  stat("length", fmtTime(F.duration)); stat("kicks", F.kickHits.size); stat("snares", F.snareHits.size);
+  stat("hats", F.hatHits.size); stat("sections", F.secEnergy.length); stat("analysed in", took + " s");
+  $("tDur").textContent = fmtTime(F.duration);
+  const tr = $("trackBar"); tr.querySelectorAll(".sec").forEach(e => e.remove());
+  for (const st of F.sectionTimes.slice(1)) { const m = document.createElement("div"); m.className = "sec"; m.style.left = (st / F.duration * 100) + "%"; tr.appendChild(m); }
+  await buildPoster();
+  app.busy = false; setEnabled(true);
+}
+
+// Simulate up to a busy moment and draw it, so the stage shows the look before you press play.
+async function buildPoster() {
+  const F = app.F, lim = Math.min(F.nframes - 1, Math.round(45 * FPS));
+  let best = Math.min(lim, Math.round(10 * FPS)), bv = -1;
+  for (let i = Math.round(4 * FPS); i <= lim; i++) { const v = F.energySlow[i] + 0.3 * F.kick[i]; if (v > bv) { bv = v; best = i; } }
+  app.posterFrame = best;
+  app.scene = new Scene(F, CONFIG.N_PARTICLES);
+  renderer.resize(app.scale);
+  for (let i = 0; i <= best; i++) {
+    app.scene.step(i);
+    if (best - i < 12) renderer.draw(app.scene);
+    if (i % 20 === 0) { showOverlay("Building a preview", `Simulating to ${fmtTime(best / FPS)}, a busy moment`, 0.7 + 0.3 * i / best); await tick(); }
+  }
+  app.atPoster = true;
+  hideOverlay(); updateMeters(best); setProgress(best / FPS);
+}
+function redrawStill() { if (app.scene && app.scene.frame >= 0 && !app.busy) renderer.draw(app.scene); }
+
+$("file").addEventListener("change", async e => {
+  const f = e.target.files[0]; if (!f) return;
+  $("fileName").textContent = f.name;
+  showOverlay("Decoding", f.name, 0);
+  try {
+    const bytes = await f.arrayBuffer();
+    const buf = await new OfflineAudioContext(2, 44100, 44100).decodeAudioData(bytes);
+    await loadBuffer(buf, f.name.replace(/\.[^.]+$/, ""));
+  } catch (err) {
+    showOverlay("Could not read this file", "Use an MP3 or WAV file. " + (err.message || ""), null);
+  }
+  e.target.value = "";
+});
+$("demoBtn").addEventListener("click", () => { $("fileName").textContent = "Demo: 40 s synth beat (intro, drop, breakdown, drop)"; loadBuffer(makeDemoTrack(), "demo"); });
+
+// ----- playback -----
+function ensureCtx() {
+  if (!app.ctx) app.ctx = new (window.AudioContext || window.webkitAudioContext)();
+  if (app.ctx.state === "suspended") app.ctx.resume();
+  return app.ctx;
+}
+function startPlayback(fromFrame, extraDest) {
+  const ctx = ensureCtx();
+  if (fromFrame === 0 || !app.scene || app.scene.N !== CONFIG.N_PARTICLES || renderer.scale !== app.scale || app.scene.frame < 0 || app.atPoster) {
+    app.scene = new Scene(app.F, CONFIG.N_PARTICLES); renderer.resize(app.scale); fromFrame = 0; app.atPoster = false;
+  }
+  const src = ctx.createBufferSource(); src.buffer = app.buffer; src.connect(ctx.destination);
+  if (extraDest) src.connect(extraDest);
+  app.offset = fromFrame / FPS; app.startAt = ctx.currentTime + 0.08;
+  src.start(app.startAt, app.offset);
+  app.src = src; app.playing = true; setPlayIcon(true);
+  requestAnimationFrame(loop);
+}
+function stopPlayback() {
+  if (app.src) { try { app.src.stop(); } catch (_) {} app.src.disconnect(); app.src = null; }
+  app.playing = false; setPlayIcon(false);
+}
+function setPlayIcon(playing) {
+  $("playIcon").innerHTML = playing ? '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>' : '<path d="M8 5v14l11-7z"/>';
+  $("playBtn").setAttribute("aria-label", playing ? "Pause" : "Play");
+}
+function setProgress(t) {
+  const F = app.F; if (!F) return;
+  $("fill").style.width = clamp(t / F.duration * 100, 0, 100) + "%"; $("tNow").textContent = fmtTime(t);
+}
+function loop() {
+  if (!app.playing) return;
+  const F = app.F, sc = app.scene;
+  const t = app.ctx.currentTime - app.startAt + app.offset;
+  const target = Math.min(F.nframes - 1, Math.floor(t * FPS));
+  const t0 = performance.now(); let stepped = false;
+  // physics replays every frame in order (deterministic); drawing happens once per screen refresh
+  while (sc.frame < target && performance.now() - t0 < 40) { sc.step(sc.frame + 1); stepped = true; }
+  if (stepped) {
+    renderer.draw(sc); updateMeters(sc.frame); setProgress(sc.frame / FPS);
+    app.fpsN++; const now = performance.now();
+    if (now - app.fpsT > 1000) { app.fps = app.fpsN * 1000 / (now - app.fpsT); app.fpsN = 0; app.fpsT = now; showPerf(target - sc.frame); }
+    if (app.recording) $("recTime").textContent = fmtTime(sc.frame / FPS) + " / " + fmtTime(F.duration);
+  }
+  if (t >= F.duration) { finishPlayback(); return; }
+  requestAnimationFrame(loop);
+}
+function finishPlayback() {
+  stopPlayback();
+  if (app.recording) app.recording.stop();
+}
+function showPerf(behind) {
+  const p = $("perf"); p.innerHTML = "";
+  const add = (k, v) => { const s = document.createElement("span"); s.innerHTML = `${k} <b></b>`; s.querySelector("b").textContent = v; p.appendChild(s); };
+  add("drawn", app.fps.toFixed(0) + " fps"); add("render", canvas.width + "×" + canvas.height);
+  add("particles", app.scene.N.toLocaleString()); add("points", (renderer.lastDots || 0).toLocaleString());
+  if (!renderer.hdr) add("buffer", "8-bit (no float targets)");
+  if (behind > 2) add("physics behind by", behind + " frames");
+}
+$("playBtn").addEventListener("click", () => {
+  if (!app.F || app.recording) return;
+  if (app.playing) { app.offset = (app.scene.frame + 1) / FPS; stopPlayback(); return; }
+  const from = app.scene && !app.atPoster && app.scene.frame >= 0 && app.scene.frame < app.F.nframes - 1 ? app.scene.frame + 1 : 0;
+  startPlayback(from);
+});
+$("restartBtn").addEventListener("click", () => { if (!app.F || app.recording) return; stopPlayback(); startPlayback(0); });
+
+// ----- export -----
+function pickMime() {
+  const opts = ["video/mp4;codecs=avc1.640028,mp4a.40.2", "video/mp4;codecs=avc1,mp4a", "video/mp4",
+                "video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
+  return opts.find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || "";
+}
+$("recBtn").addEventListener("click", () => {
+  if (app.recording) { finishPlayback(); return; }
+  if (!app.F) return;
+  if (!canvas.captureStream || !window.MediaRecorder) {
+    $("recNote").textContent = "This browser cannot record a canvas. Try Chrome on desktop or Android, or Safari 15 or newer.";
+    return;
+  }
+  stopPlayback(); $("saveOut").hidden = true; app.recBlob = null;
+  const ctx = ensureCtx(), dest = ctx.createMediaStreamDestination();
+  app.scene = null; startPlayback(0, dest);      // fresh scene at the chosen render size
+  const stream = canvas.captureStream(FPS);
+  dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+  const mime = pickMime(), chunks = [];
+  const rec = new MediaRecorder(stream, { mimeType: mime || undefined, videoBitsPerSecond: canvas.width >= 1080 ? 12e6 : 6e6, audioBitsPerSecond: 192e3 });
+  rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  rec.onstop = () => {
+    const type = rec.mimeType || mime || "video/webm";
+    app.recBlob = new Blob(chunks, { type }); app.recExt = type.includes("mp4") ? "mp4" : "webm";
+    app.recording = null; $("recBtn").classList.remove("on"); $("recLabel").textContent = "Record video"; $("recBadge").hidden = true;
+    $("playBtn").disabled = $("restartBtn").disabled = $("demoBtn").disabled = $("file").disabled = false;
+    $("saveVidBtn").textContent = `Save video (${app.recExt.toUpperCase()}, ${(app.recBlob.size / 1048576).toFixed(1)} MB)`;
+    $("saveOut").hidden = false;
+    $("recNote").textContent = app.recExt === "webm"
+      ? "This browser records WebM. Instagram and TikTok want MP4, so convert it first, or record in Safari or a recent Chrome, which record MP4."
+      : "MP4 recorded in real time. If the frame rate dipped while recording, use the fast render size or fewer particles.";
+  };
+  rec.start(1000);
+  app.recording = rec;
+  $("recBtn").classList.add("on"); $("recLabel").textContent = "Stop recording"; $("recBadge").hidden = false;
+  $("playBtn").disabled = $("restartBtn").disabled = $("demoBtn").disabled = $("file").disabled = true;
+});
+async function offerFile(blob, filename) {
+  if (app.downloads) {
+    try { await app.downloads.save({ filename, data: blob }); return "Saved " + filename; }
+    catch (e) { if (e && e.code === "declined") return "Save cancelled."; if (e && e.code !== "unavailable") return "Could not save: " + (e.message || e.code); }
+  }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  return "Saved " + filename;
+}
+const safeName = () => "gravity-harp-" + app.name.replace(/[^\w-]+/g, "-").slice(0, 60);
+$("saveVidBtn").addEventListener("click", async () => {
+  if (!app.recBlob) return;
+  $("recNote").textContent = await offerFile(app.recBlob, `${safeName()}.${app.recExt}`);
+});
+$("stillBtn").addEventListener("click", () => {
+  if (!app.scene) return;
+  if (!app.playing) renderer.draw(app.scene);
+  canvas.toBlob(async b => { if (b) $("recNote").textContent = await offerFile(b, `${safeName()}-${fmtTime(app.scene.frame / FPS).replace(":", "m")}s.png`); }, "image/png");
+});
+
+// open in a working state: analyse the built-in demo track straight away
+if (renderer) setTimeout(() => loadBuffer(makeDemoTrack(), "demo"), 50);
+</script>
