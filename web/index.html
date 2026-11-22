@@ -3621,13 +3621,39 @@ class SteppeFlight {
         for (let k = -30; k <= 30; k++) { const [x, z] = world(d, half * k / 30); row.push([x, this.H(x, z), z]); }
         for (let q = 1; q < row.length; q++) if (row[q][1] > 500 || row[q - 1][1] > 500) poly([row[q - 1], row[q]], snow, it * 2 * Math.min(1, Math.max(row[q][1], row[q - 1][1]) / 1400));
       }
-      // grass: short blades near you, swaying in rolling waves of wind
-      const wave = (x, z) => Math.sin((x * this.wx + z * this.wz) * 0.004 - t * (2 + 2 * this.gust)) * (6 + 10 * this.gust + 6 * C.WIND);
-      const gcell = 60, nb = 40;
+      // grass: a still stipple texture on the land, with soft bands of light rolling across it in the wind
+      const gscale = 0.0025, gspeed = 1.2 + 1.5 * this.gust;
+      const shine = (x, z) => 0.5 + 0.5 * Math.sin((x * this.wx + z * this.wz) * gscale - t * gspeed);
+      const gcell = 55, nb = 46;
       for (let a = 0; a < nb; a++) for (let b = -nb; b < nb; b++) {
-        const gx = Math.floor(cam.x / gcell) * gcell + b * gcell, gz = Math.floor(cam.z / gcell) * gcell + a * gcell * 1.6 * Math.sign(fz || 1);
-        const jx = gx + hash2(gx, gz) * gcell, jz = gz + hash2(gz, gx) * gcell, h = this.H(jx, jz), sw = wave(jx, jz);
-        poly([[jx, h, jz], [jx + this.wx * sw, h + 22, jz + this.wz * sw]], grass, it * 1.6);
+        const gx = Math.floor(cam.x / gcell) * gcell + b * gcell, gz = Math.floor(cam.z / gcell) * gcell + a * gcell * 1.5 * Math.sign(fz || 1);
+        const jx = gx + hash2(gx, gz) * gcell, jz = gz + hash2(gz, gx) * gcell, h = this.H(jx, jz) + 2;
+        const p = P(jx, h, jz); if (!p || p[0] < -4 || p[0] > W + 4 || p[1] < -4 || p[1] > H + 4) continue;
+        const w = shine(jx, jz), f = it * (0.35 + (0.9 + 0.8 * this.gust) * w * w * (0.4 + 0.6 * C.WIND)) * fog(p[2]) * 2.2;
+        r.pushDot(n++, p[0], p[1], grass[0], grass[1], grass[2], f);
+        const q = P(jx + this.wx * 9, h, jz + this.wz * 9); if (q) r.pushDot(n++, q[0], q[1], grass[0], grass[1], grass[2], f * 0.6);   // a short dash along the wind
+      }
+      // the occasional lone tree, combed out by the wind, swaying slowly
+      const ts = 1700, ti0 = Math.floor((cam.x - 6000) / ts), ti1 = Math.floor((cam.x + 6000) / ts), tj0 = Math.floor((cam.z - 1000) / ts), tj1 = Math.floor((cam.z + 9000) / ts);
+      const bark = grass.map(q => q * 0.9);
+      for (let ti = ti0; ti <= ti1; ti++) for (let tj = tj0; tj <= tj1; tj++) {
+        if (hash2(ti * 13, tj * 7) > 0.2) continue;
+        const tx = (ti + hash2(ti, tj * 3)) * ts, tz = (tj + hash2(ti * 3, tj)) * ts;
+        const dd = (tx - cam.x) * fx + (tz - cam.z) * fz; if (dd < 40 || dd > 9000) continue;
+        const g0 = this.H(tx, tz), Ht = 70 + hash2(ti, tj) * 70, lean = 0.35 + 0.25 * hash2(tj, ti), sway = 0.06 * Math.sin(t * 0.7 + ti + tj);
+        const wxl = this.wx * (lean + sway), wzl = this.wz * (lean + sway);
+        const at = u => [tx + wxl * Ht * u * u, g0 + Ht * u, tz + wzl * Ht * u * u];       // a trunk bent downwind
+        const trunk = [0, 0.35, 0.7, 1].map(at); poly(trunk, bark, it * 2);
+        for (let k = 0; k < 5; k++) {                                // branches swept the same way
+          const u = 0.55 + k * 0.1, b0 = at(u), side = (k % 2 ? 1 : -1) * (0.3 + 0.2 * hash2(k, ti));
+          poly([b0, [b0[0] + this.wx * Ht * 0.5 - this.wz * side * Ht * 0.4, b0[1] + Ht * 0.12, b0[2] + this.wz * Ht * 0.5 + this.wx * side * Ht * 0.4]], bark, it * 1.4);
+        }
+        const top = at(1);
+        for (let k = 0; k < 18; k++) {                               // a brushy crown, every stroke combed downwind
+          const a = hash2(k, tj) * 6.28, rr = Ht * 0.45 * hash2(ti, k), cx = top[0] + Math.cos(a) * rr * 0.6, cy = top[1] - Ht * 0.15 + Math.sin(a) * rr * 0.35, cz = top[2] + Math.sin(a) * rr * 0.6;
+          const len = Ht * (0.18 + 0.12 * hash2(k, ti));
+          poly([[cx, cy, cz], [cx + this.wx * len * (1 + sway), cy - len * 0.15, cz + this.wz * len * (1 + sway)]], grass, it * 1.5);
+        }
       }
     }
     // camps of gers and grazing herds (placed by a hash of the land, so they're always in the same places)
