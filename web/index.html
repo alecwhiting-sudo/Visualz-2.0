@@ -2777,7 +2777,7 @@ const FOREST = {
   RAIN: 70,                          // data rain columns per second at full energy
   RAIN_SPEED: 1300,
   BEINGS: 16,
-  BEING_SIZE: 140,                   // light being length (units)
+  BEING_SIZE: 160,                   // light being height (units)
   TREE_INT: 0.42, LEAF_INT: 0.75, RAIN_INT: 0.65, BEING_INT: 1.6,
   GLOW: 0.8, EXPOSURE: 1.7, FADE_IN: 1.5, FADE_OUT: 3.0,
   PALETTE_LOCK: -1,
@@ -2954,38 +2954,58 @@ class DataForest {
     }
   }
 
-  // a soft seahorse-like form: points along a curved spine, puffy body, curling tail, a rippling fin
+  // a slender seahorse drawn in fine glowing lines: crowned head, long snout, arched neck, rounded chest,
+  // ring segments, a fluttering back fin and a tail that curls forward into a spiral
   being(b, P, push, fog) {
-    const C = FOREST, L = C.BEING_SIZE * (0.92 + 0.08 * Math.sin(this.t * 0.7 + b.ph)), t = this.t;
-    const ux = -Math.sin(b.ang), uz = Math.cos(b.ang);                    // the body's sideways axis (around the trunk)
-    const sway = s => Math.sin(t * 0.8 + b.ph + s * 2.5) * 0.06 * L * s;
-    const spine = [];
-    for (let k = 0; k <= 34; k++) {
-      const s = k / 34; let u, v;
-      if (s < 0.6) { u = 0.22 * L * Math.sin(s / 0.6 * Math.PI * 0.9); v = -s * L; }      // head and belly
-      else {                                                                             // the tail curls into a spiral
-        const q = (s - 0.6) / 0.4, th = q * 1.7 * Math.PI, rho = 0.16 * L * (1 - 0.75 * q);
-        u = 0.03 * L - rho * Math.sin(th) + 0.16 * L * 0.05; v = -0.6 * L - 0.16 * L + rho * Math.cos(th) - q * 0.06 * L;
-      }
-      u += sway(s); spine.push([b.pos[0] + ux * u + b.lean[0] * s * s, b.pos[1] + v, b.pos[2] + uz * u + b.lean[1] * s * s, s]);
+    const C = FOREST, L = C.BEING_SIZE, t = this.t, ph = b.ph;
+    const face = b.face ?? (b.face = Math.sin(ph * 7.3) > 0 ? 1 : -1);
+    const fx = -Math.sin(b.ang) * face, fz = Math.cos(b.ang) * face;      // the direction it faces (around the trunk)
+    const curl = 1 + 0.12 * Math.sin(t * 0.5 + ph);                       // the tail spiral breathes
+    // spine from crown to tail tip, in (forward, up) units of body length
+    const K = [[0, 0], [-0.045, -0.07], [-0.065, -0.16], [-0.02, -0.27], [0.03, -0.38], [0.035, -0.49], [-0.01, -0.6], [-0.06, -0.7],
+               [-0.06 * curl, -0.8], [0.0, -0.87 * (0.97 + 0.03 * curl)], [0.065 * curl, -0.84], [0.08 * curl, -0.77], [0.05, -0.74], [0.025, -0.765]];
+    const W = [0.05, 0.045, 0.035, 0.05, 0.058, 0.052, 0.04, 0.028, 0.02, 0.014, 0.01, 0.007, 0.005, 0.003];   // half-widths: slender
+    const sp = [], N = 70;
+    for (let q = 0; q <= N; q++) {                                         // Catmull-Rom through the control points
+      const f = q / N * (K.length - 1), k = Math.min(K.length - 2, Math.floor(f)), u = f - k;
+      const p0 = K[Math.max(0, k - 1)], p1 = K[k], p2 = K[k + 1], p3 = K[Math.min(K.length - 1, k + 2)];
+      const cr = c => 0.5 * (2 * p1[c] + (-p0[c] + p2[c]) * u + (2 * p0[c] - 5 * p1[c] + 4 * p2[c] - p3[c]) * u * u + (-p0[c] + 3 * p1[c] - 3 * p2[c] + p3[c]) * u * u * u);
+      sp.push([cr(0), cr(1), W[k] + (W[k + 1] - W[k]) * u]);
     }
-    const it = C.BEING_INT * this.Lb * (0.5 + 0.5 * this.E), glow = 0.55 + 0.25 * Math.sin(t * 0.7 + b.ph) + 0.8 * b.glow + 0.2 * this.bass, col = b.col;
-    for (const [x, y, z, s] of spine) {
-      const p = P(x, y, z); if (!p) continue;
-      const rad = (s < 0.12 ? 0.13 : s < 0.6 ? 0.1 + 0.06 * Math.sin((s - 0.12) / 0.48 * Math.PI) : 0.05 * (1 - (s - 0.6) / 0.4) + 0.012) * L;
-      const R = Math.max(1.5, rad * C.FOCAL / p[2]), f = fog(p[2]) * it * glow;
-      for (const [rr, w] of [[1, 0.035], [0.66, 0.06], [0.33, 0.09]]) {          // a soft filled puff: dim edge, brighter middle
-        const m = Math.max(5, Math.round(R * rr * 1.6)), off = rr * 0.7;
-        for (let k = 0; k < m; k++) { const a = k / m * 2 * Math.PI + off; push(p[0] + Math.cos(a) * R * rr, p[1] + Math.sin(a) * R * rr, col, f * w); }
+    const bob = Math.sin(t * 0.6 + ph) * 0.03 * L, tilt = 0.08 * Math.sin(t * 0.35 + ph);
+    const W3 = (u, v) => {                                                // local (forward, up) -> world
+      const uu = u * Math.cos(tilt) - v * Math.sin(tilt), vv = u * Math.sin(tilt) + v * Math.cos(tilt), s = -vv;
+      return [b.pos[0] + fx * uu * L + b.lean[0] * s * s, b.pos[1] + 0.3 * L + vv * L + bob, b.pos[2] + fz * uu * L + b.lean[1] * s * s];
+    };
+    const it = C.BEING_INT * this.Lb * (0.5 + 0.5 * this.E), glow = 0.6 + 0.2 * Math.sin(t * 0.7 + ph) + 0.7 * b.glow + 0.15 * this.bass, col = b.col;
+    const pr = (u, v) => P(...W3(u, v));
+    const stroke = (pts, c, w) => {                                       // a fine glowing line through projected points
+      for (let q = 1; q < pts.length; q++) {
+        const a = pts[q - 1], c2 = pts[q]; if (!a || !c2) continue;
+        const dx = c2[0] - a[0], dy = c2[1] - a[1], m = Math.max(1, Math.ceil(Math.hypot(dx, dy) / 1.6)), f = fog(a[2]) * it * glow * w;
+        for (let k = 0; k < m; k++) push(a[0] + dx * k / m, a[1] + dy * k / m, c, f);
       }
-      push(p[0], p[1], [1, 1, 1], f * 0.14);
+    };
+    const left = [], right = [], core = [];
+    for (let q = 0; q < sp.length; q++) {
+      const a = sp[Math.max(0, q - 1)], c2 = sp[Math.min(sp.length - 1, q + 1)], tx = c2[0] - a[0], ty = c2[1] - a[1], l = Math.hypot(tx, ty) || 1;
+      const nx = -ty / l, ny = tx / l, [u, v, w] = sp[q];
+      left.push(pr(u + nx * w, v + ny * w)); right.push(pr(u - nx * w, v - ny * w)); core.push(pr(u, v));
+      if (q % 5 === 2 && q > 8 && q < 50) stroke([pr(u + nx * w, v + ny * w), pr(u - nx * w, v - ny * w)], col, 0.18);   // ring segments
     }
-    // snout, eye and a fin rippling along the back
-    const head = spine[2], sn = P(head[0] - ux * 0.2 * L, head[1] - 0.02 * L, head[2] - uz * 0.2 * L), hp = P(head[0], head[1], head[2]);
-    if (sn && hp) { const f = fog(hp[2]) * it * glow; for (let k = 0; k <= 8; k++) { const u2 = k / 8; push(hp[0] + (sn[0] - hp[0]) * u2, hp[1] + (sn[1] - hp[1]) * u2, col, f * 0.3); } push(hp[0] + (sn[0] - hp[0]) * 0.25, hp[1] - 2, [1, 1, 1], f * 0.8); }
-    for (let k = 6; k < 18; k += 2) {
-      const sp = spine[k], fin = Math.sin(t * 2.2 + k * 0.6) * 0.06 * L, p = P(sp[0] - ux * (0.12 * L + fin), sp[1], sp[2] - uz * (0.12 * L + fin));
-      if (p) push(p[0], p[1], col, fog(p[2]) * it * glow * 0.3);
+    stroke(left, col, 0.6); stroke(right, col, 0.6); stroke(core, col, 0.08);
+    const head = []; for (let k = 0; k <= 20; k++) { const a = k / 20 * 2 * Math.PI; head.push(pr(0.012 + Math.cos(a) * 0.052, -0.06 + Math.sin(a) * 0.042)); }
+    stroke(head, col, 0.55);                                                // a small rounded head where the snout joins
+    // head: snout, eye and a small crown
+    stroke([pr(0.03, -0.05), pr(0.1, -0.075), pr(0.2, -0.095)], col, 0.4);
+    stroke([pr(0.03, -0.085), pr(0.1, -0.095), pr(0.2, -0.105)], col, 0.4);
+    stroke([pr(0.2, -0.095), pr(0.205, -0.105)], col, 0.6);
+    const eye = pr(0.012, -0.055); if (eye) push(eye[0], eye[1], [1, 1, 1], fog(eye[2]) * it * glow * 1.4);
+    for (const [u, v] of [[-0.03, 0.025], [0.0, 0.035], [0.025, 0.02]]) stroke([pr(u * 0.4, 0), pr(u, v)], col, 0.35);
+    // back fin: a delicate fan that flutters
+    for (let k = 0; k < 7; k++) {
+      const s0 = 22 + k * 2, base = sp[s0], wv = Math.sin(t * 3 + k * 0.7 + ph) * 0.012;
+      stroke([pr(base[0] - base[2], base[1]), pr(base[0] - base[2] - 0.07 + wv, base[1] + 0.02 + wv)], col, 0.22);
     }
   }
 
