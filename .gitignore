@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+features.npz
+part*.mp4
+part*.log
+parts.txt
+video_only.mp4
+*.partial.mp4
+still_*.png
